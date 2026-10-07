@@ -1,0 +1,7 @@
+
+## Core Concepts
+
+- **Tasks** move through states: TODO → READY → IN_PROGRESS → COMPLETED
+- **Dependencies** block tasks until prerequisites are complete
+- **Events** fire on every state change for automation
+- **Automation** automatically unlocks dependent tasks
