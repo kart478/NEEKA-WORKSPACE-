@@ -1,9 +1,1 @@
-# .gitignore
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.venv/
-venv/
-dist/
-build/
+"""Compatibility module retained from the original Part 1 file layout."""
