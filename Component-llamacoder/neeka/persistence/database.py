@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Database:
@@ -41,8 +41,15 @@ class Database:
             if current is None:
                 self._migration_v1(connection)
                 connection.execute("INSERT INTO schema_version(version) VALUES (?)", (SCHEMA_VERSION,))
-            elif current["version"] < SCHEMA_VERSION:
-                raise RuntimeError("Database migration is required for this schema version")
+                self._migration_v2(connection)
+            else:
+                version = current["version"]
+                if version < 2:
+                    self._migration_v2(connection)
+                    version = 2
+                    connection.execute("UPDATE schema_version SET version = ?", (version,))
+                if version < SCHEMA_VERSION:
+                    connection.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
 
     @staticmethod
     def _migration_v1(connection: sqlite3.Connection) -> None:
@@ -81,5 +88,20 @@ class Database:
                 FOREIGN KEY(actor_id) REFERENCES users(id)
             );
             CREATE INDEX idx_events_timestamp ON events(timestamp);
+            """
+        )
+
+    @staticmethod
+    def _migration_v2(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS automation_executions (
+                execution_id TEXT PRIMARY KEY, event_id TEXT NOT NULL, rule_id TEXT NOT NULL,
+                status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT,
+                error TEXT, attempts INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(event_id, rule_id), FOREIGN KEY(event_id) REFERENCES events(event_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_automation_executions_status
+                ON automation_executions(status);
             """
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime
+from uuid import uuid4
 
 from neeka.brain.event import Event, EventType
 from neeka.brain.project import Project, ProjectStatus
@@ -79,7 +80,9 @@ class SQLiteProjectRepository:
             if not row:
                 return None
             members = connection.execute(
-                "SELECT user_id FROM project_members WHERE project_id = ? ORDER BY joined_at", (project_id,)
+                """SELECT user_id FROM project_members WHERE project_id = ?
+                   ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, joined_at, rowid""",
+                (project_id, row["owner_id"]),
             ).fetchall()
             tasks = connection.execute(
                 "SELECT id FROM tasks WHERE project_id = ? ORDER BY created_at", (project_id,)
@@ -175,3 +178,53 @@ class SQLiteEventRepository:
         return [Event(EventType(row["event_type"]), row["entity_id"], row["actor_id"],
                       json.loads(row["metadata"]), row["event_id"], _required_date(row["timestamp"]))
                 for row in rows]
+
+
+class SQLiteAutomationExecutionRepository:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def start(self, event_id: str, rule_id: str) -> str | None:
+        execution_id = str(uuid4())
+        with self.database.session() as connection:
+            try:
+                connection.execute(
+                    """INSERT INTO automation_executions
+                       (execution_id, event_id, rule_id, status, started_at)
+                       VALUES (?, ?, ?, 'RUNNING', ?)""",
+                    (execution_id, event_id, rule_id, datetime.utcnow().isoformat()),
+                )
+            except sqlite3.IntegrityError:
+                return None
+        return execution_id
+
+    def finish(self, execution_id: str, status: str, error: str | None = None) -> None:
+        with self.database.session() as connection:
+            connection.execute(
+                """UPDATE automation_executions SET status = ?, finished_at = ?, error = ?
+                   WHERE execution_id = ?""",
+                (status, datetime.utcnow().isoformat(), error, execution_id),
+            )
+
+    def retry(self, event_id: str, rule_id: str) -> str | None:
+        with self.database.session() as connection:
+            row = connection.execute(
+                "SELECT execution_id, attempts FROM automation_executions WHERE event_id = ? AND rule_id = ?",
+                (event_id, rule_id),
+            ).fetchone()
+            if not row:
+                return self.start(event_id, rule_id)
+            execution_id = row["execution_id"]
+            connection.execute(
+                """UPDATE automation_executions SET status = 'RUNNING', finished_at = NULL,
+                   error = NULL, attempts = attempts + 1 WHERE execution_id = ?""",
+                (execution_id,),
+            )
+        return execution_id
+
+    def list(self) -> list[dict]:
+        with self.database.session() as connection:
+            rows = connection.execute(
+                "SELECT * FROM automation_executions ORDER BY started_at, execution_id"
+            ).fetchall()
+        return [dict(row) for row in rows]

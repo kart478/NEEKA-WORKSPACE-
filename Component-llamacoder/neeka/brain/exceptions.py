@@ -36,3 +36,11 @@ class DuplicateMemberError(NEEKAError):
 
 class InvalidProjectMembershipError(NEEKAError):
     pass
+
+
+class AutomationError(NEEKAError):
+    pass
+
+
+class AutomationLoopError(AutomationError):
+    pass

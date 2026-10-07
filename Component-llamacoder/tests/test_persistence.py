@@ -3,10 +3,14 @@ import sqlite3
 import pytest
 
 from neeka import NEEKAEngine
+from neeka.automation.rules import AutomationRule
+from neeka.brain.event import EventType
 from neeka.brain.exceptions import (
+    AutomationLoopError,
     CircularDependencyError,
     DuplicateMemberError,
     InvalidProjectMembershipError,
+    InvalidTaskTransitionError,
     ProjectNotFoundError,
     TaskNotFoundError,
     UserNotFoundError,
@@ -114,6 +118,96 @@ def test_completion_reacts_and_unlocks_next_task(tmp_path):
 
     engine.assign_task(task_b.id, sarah.id, owner.id)
     assert engine.get_task(task_b.id).assigned_to == sarah.id
+
+
+def test_multiple_dependencies_unlock_only_after_all_complete(tmp_path):
+    engine = make_engine(tmp_path)
+    owner, member, project = make_project(engine)
+    task_a = engine.create_task("A", "", project.id, owner.id)
+    task_b = engine.create_task("B", "", project.id, owner.id)
+    task_c = engine.create_task("C", "", project.id, owner.id)
+    engine.add_task_dependency(task_c.id, task_a.id, owner.id)
+    engine.add_task_dependency(task_c.id, task_b.id, owner.id)
+    engine.assign_task(task_a.id, member.id, owner.id)
+    engine.assign_task(task_b.id, member.id, owner.id)
+    engine.start_task(task_a.id, member.id)
+    engine.complete_task(task_a.id, member.id)
+    assert engine.get_task(task_c.id).status == TaskStatus.BLOCKED
+
+    engine.start_task(task_b.id, member.id)
+    engine.complete_task(task_b.id, member.id)
+    assert engine.get_task(task_c.id).status == TaskStatus.READY
+
+
+def test_automation_execution_is_persisted_and_idempotent(tmp_path):
+    engine = make_engine(tmp_path)
+    owner, member, project = make_project(engine)
+    dependency = engine.create_task("A", "", project.id, owner.id)
+    dependent = engine.create_task("B", "", project.id, owner.id)
+    engine.add_task_dependency(dependent.id, dependency.id, owner.id)
+    engine.assign_task(dependency.id, member.id, owner.id)
+    engine.start_task(dependency.id, member.id)
+    engine.complete_task(dependency.id, member.id)
+    ready_event = next(event for event in engine.get_events() if event.event_type == EventType.TASK_COMPLETED)
+    before = len(engine.get_events())
+    engine.automation.process_event(ready_event)
+    assert len(engine.get_events()) == before
+    records = engine.automation_executions.list()
+    assert any(record["rule_id"] == "unlock-completed-task-dependents" and record["status"] == "SUCCESS"
+               for record in records)
+    assert any(record["event_id"] == ready_event.id for record in records)
+
+
+def test_failed_automation_is_recorded_and_retryable(tmp_path):
+    engine = make_engine(tmp_path)
+    owner, _, project = make_project(engine)
+
+    class FailingAction:
+        def execute(self, _engine, _event):
+            raise RuntimeError("expected automation failure")
+
+    rule = AutomationRule("failing-rule", EventType.TASK_ASSIGNED, lambda _engine, _event: True, FailingAction())
+    engine.automation.add_rule(rule)
+    task = engine.create_task("Task", "", project.id, owner.id)
+    with pytest.raises(RuntimeError, match="expected automation failure"):
+        engine.assign_task(task.id, owner.id, owner.id)
+    failed = next(record for record in engine.automation_executions.list() if record["rule_id"] == "failing-rule")
+    assert failed["status"] == "FAILED"
+    assert failed["error"] == "expected automation failure"
+
+    class SuccessfulAction:
+        def execute(self, _engine, _event):
+            return None
+
+    engine.automation.rules[-1] = AutomationRule(
+        "failing-rule", EventType.TASK_ASSIGNED, lambda _engine, _event: True, SuccessfulAction()
+    )
+    assignment_event = next(event for event in engine.get_events() if event.event_type == EventType.TASK_ASSIGNED)
+    engine.automation.process_event(assignment_event, retry_failed=True)
+    retried = next(record for record in engine.automation_executions.list() if record["rule_id"] == "failing-rule")
+    assert retried["status"] == "SUCCESS"
+    assert retried["attempts"] == 2
+
+
+def test_workflow_rejects_completed_task_reopen(tmp_path):
+    engine = make_engine(tmp_path)
+    owner, member, project = make_project(engine)
+    task = engine.create_task("Task", "", project.id, owner.id)
+    engine.assign_task(task.id, member.id, owner.id)
+    engine.start_task(task.id, member.id)
+    engine.complete_task(task.id, member.id)
+    with pytest.raises(InvalidTaskTransitionError):
+        engine.transition_task(task.id, TaskStatus.IN_PROGRESS, owner.id)
+
+
+def test_automation_depth_guard_rejects_runaway_event(tmp_path):
+    engine = make_engine(tmp_path)
+    owner, _, project = make_project(engine)
+    task = engine.create_task("Task", "", project.id, owner.id)
+    event = next(event for event in engine.get_events() if event.event_type == EventType.TASK_CREATED)
+    event.metadata["_automation_depth"] = engine.automation.max_depth + 1
+    with pytest.raises(AutomationLoopError):
+        engine.automation.process_event(event)
 
 
 def test_event_history_persists(tmp_path):

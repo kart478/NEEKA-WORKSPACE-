@@ -5,11 +5,13 @@ from pathlib import Path
 from neeka.persistence.database import Database
 from neeka.persistence.repositories import EventRepository, ProjectRepository, TaskRepository, UserRepository
 from neeka.persistence.sqlite_repositories import (
+    SQLiteAutomationExecutionRepository,
     SQLiteEventRepository,
     SQLiteProjectRepository,
     SQLiteTaskRepository,
     SQLiteUserRepository,
 )
+from neeka.automation.engine import AutomationEngine
 from .event import Event, EventType
 from .exceptions import (
     CircularDependencyError,
@@ -26,6 +28,7 @@ from .project import Project, ProjectStatus
 from .task import Task, TaskPriority, TaskStatus
 from .user import User, UserRole
 from .workflow import Workflow
+from neeka.workflow.executor import WorkflowExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ class NEEKAEngine:
         project_repository: ProjectRepository | None = None,
         task_repository: TaskRepository | None = None,
         event_repository: EventRepository | None = None,
+        automation_execution_repository=None,
     ) -> None:
         self.database = Database(db_path)
         self._users: dict[str, User] = {}
@@ -50,6 +54,9 @@ class NEEKAEngine:
         self.projects = project_repository or SQLiteProjectRepository(self.database)
         self.tasks = task_repository or SQLiteTaskRepository(self.database)
         self.events = event_repository or SQLiteEventRepository(self.database)
+        self.automation_executions = automation_execution_repository or SQLiteAutomationExecutionRepository(self.database)
+        self.workflow = WorkflowExecutor()
+        self.automation = AutomationEngine(self, self.automation_executions)
         self._load()
         logger.info("NEEKA started with database %s", db_path)
 
@@ -61,6 +68,10 @@ class NEEKAEngine:
 
     def close(self) -> None:
         logger.info("NEEKA shutting down")
+
+    @staticmethod
+    def utcnow() -> datetime:
+        return datetime.utcnow()
 
     def create_user(self, name: str, email: str, role: UserRole = UserRole.MEMBER) -> User:
         user = User(name=name, email=email, role=role)
@@ -162,7 +173,7 @@ class NEEKAEngine:
         self.tasks.add_dependency(task_id, depends_on_id)
         task.add_dependency(depends_on_id)
         if not task.dependencies_satisfied(self._tasks):
-            task.status = TaskStatus.BLOCKED
+            self.workflow.transition(task, TaskStatus.BLOCKED)
             self.tasks.save(task)
             self._emit_event(EventType.TASK_BLOCKED, task_id, actor_id, {"reason": "dependency_added"})
 
@@ -185,7 +196,7 @@ class NEEKAEngine:
         if not task.dependencies_satisfied(self._tasks):
             raise TaskDependencyError(f"Task {task_id} has unsatisfied dependencies")
         if task.status == TaskStatus.TODO:
-            task.status = TaskStatus.READY
+            self.workflow.transition(task, TaskStatus.READY)
         self._transition_task(task, TaskStatus.IN_PROGRESS)
         task.started_at = datetime.utcnow()
         self.tasks.save(task)
@@ -199,7 +210,6 @@ class NEEKAEngine:
         task.completed_at = datetime.utcnow()
         self.tasks.save(task)
         self._emit_event(EventType.TASK_COMPLETED, task_id, actor_id)
-        self._check_dependent_tasks(task_id, actor_id)
         self._check_project_completion(task.project_id)
         logger.info("Task completed: %s", task_id)
 
@@ -211,19 +221,32 @@ class NEEKAEngine:
         self._emit_event(EventType.TASK_CANCELLED, task_id, actor_id)
 
     def _transition_task(self, task: Task, new_status: TaskStatus) -> None:
-        if not Workflow.can_transition(task.status, new_status):
-            raise InvalidTaskTransitionError(f"Cannot transition task {task.id} from {task.status} to {new_status}")
-        task.status = new_status
-        task.updated_at = datetime.utcnow()
+        self.workflow.transition(task, new_status)
 
-    def _check_dependent_tasks(self, completed_task_id: str, actor_id: str) -> None:
+    def transition_task(self, task_id: str, new_status: TaskStatus, actor_id: str) -> Task:
+        task = self.get_task(task_id)
+        self.get_user(actor_id)
+        self._transition_task(task, new_status)
+        self.tasks.save(task)
+        return task
+
+    def _unlock_dependent_tasks(self, completed_task_id: str, actor_id: str, metadata: dict | None = None) -> None:
+        depth = int((metadata or {}).get("_automation_depth", 0)) + 1
         for task in self._tasks.values():
             if completed_task_id in task.dependency_ids and task.dependencies_satisfied(self._tasks):
                 if task.status in (TaskStatus.BLOCKED, TaskStatus.TODO):
-                    task.status = TaskStatus.READY
-                    task.updated_at = datetime.utcnow()
+                    self.workflow.transition(task, TaskStatus.READY)
                     self.tasks.save(task)
-                    self._emit_event(EventType.TASK_READY, task.id, actor_id, {"reason": "dependencies_satisfied"})
+                    self._emit_event(
+                        EventType.TASK_READY,
+                        task.id,
+                        actor_id,
+                        {"reason": "dependencies_satisfied", "_automation_depth": depth},
+                    )
+
+    def _check_dependent_tasks(self, completed_task_id: str, actor_id: str) -> None:
+        """Compatibility alias for callers from the Part 2 engine."""
+        self._unlock_dependent_tasks(completed_task_id, actor_id)
 
     def _check_project_completion(self, project_id: str) -> None:
         project = self.get_project(project_id)
@@ -236,6 +259,7 @@ class NEEKAEngine:
         event = Event(event_type=event_type, source_entity=source_entity, actor_id=actor_id, metadata=metadata or {})
         self.events.append(event)
         self._events.append(event)
+        self.automation.process_event(event)
 
     def get_events(self) -> list[Event]:
         return self._events.copy()
