@@ -92,6 +92,30 @@ def test_dependencies_and_cycle_protection(tmp_path):
     assert restarted.get_task(task_c.id).dependency_ids == [task_b.id]
 
 
+def test_completion_reacts_and_unlocks_next_task(tmp_path):
+    engine = make_engine(tmp_path)
+    owner = engine.create_user("Owner", "owner@example.com", UserRole.MANAGER)
+    john = engine.create_user("John", "john@example.com")
+    sarah = engine.create_user("Sarah", "sarah@example.com")
+    project = engine.create_project("Project", "", owner.id)
+    engine.add_project_member(project.id, john.id, owner.id)
+    engine.add_project_member(project.id, sarah.id, owner.id)
+
+    task_a = engine.create_task("Task A", "", project.id, owner.id)
+    task_b = engine.create_task("Task B", "", project.id, owner.id)
+    engine.add_task_dependency(task_b.id, task_a.id, owner.id)
+    engine.assign_task(task_a.id, john.id, owner.id)
+    engine.start_task(task_a.id, john.id)
+    engine.complete_task(task_a.id, john.id)
+
+    assert engine.get_task(task_b.id).status == TaskStatus.READY
+    event_types = [event.event_type.value for event in engine.get_events()]
+    assert event_types.index("TASK_COMPLETED") < event_types.index("TASK_READY")
+
+    engine.assign_task(task_b.id, sarah.id, owner.id)
+    assert engine.get_task(task_b.id).assigned_to == sarah.id
+
+
 def test_event_history_persists(tmp_path):
     engine = make_engine(tmp_path)
     owner, member, project = make_project(engine)
