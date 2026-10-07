@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Database:
@@ -55,14 +55,16 @@ class Database:
                 self._migration_v1(connection)
                 connection.execute("INSERT INTO schema_version(version) VALUES (?)", (SCHEMA_VERSION,))
                 self._migration_v2(connection)
+                self._migration_v3(connection)
             else:
                 version = current["version"]
                 if version < 2:
                     self._migration_v2(connection)
                     version = 2
-                    connection.execute("UPDATE schema_version SET version = ?", (version,))
-                if version < SCHEMA_VERSION:
-                    connection.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+                if version < 3:
+                    self._migration_v3(connection)
+                    version = 3
+                connection.execute("UPDATE schema_version SET version = ?", (version,))
 
     @staticmethod
     def _migration_v1(connection: sqlite3.Connection) -> None:
@@ -116,5 +118,19 @@ class Database:
             );
             CREATE INDEX IF NOT EXISTS idx_automation_executions_status
                 ON automation_executions(status);
+            """
+        )
+
+    @staticmethod
+    def _migration_v3(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS ai_audit_records (
+                audit_id TEXT PRIMARY KEY, provider TEXT NOT NULL, operation TEXT NOT NULL,
+                action TEXT, parameters TEXT NOT NULL, permission_mode TEXT NOT NULL,
+                timestamp TEXT NOT NULL, success INTEGER NOT NULL, error TEXT,
+                project_id TEXT, task_id TEXT, execution_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_audit_timestamp ON ai_audit_records(timestamp);
             """
         )

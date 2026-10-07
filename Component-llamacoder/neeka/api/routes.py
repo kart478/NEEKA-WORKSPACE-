@@ -7,12 +7,15 @@ from neeka.brain.project import Project
 from neeka.brain.task import Task
 from neeka.brain.user import User
 from neeka.services.control import ControlService
+from neeka.intelligence.gateway import IntelligenceGateway, StructuredAction
+from neeka.intelligence.permissions import PermissionMode
 from neeka.workflow.definitions import STANDARD_TASK_WORKFLOW
-from .dependencies import get_engine, get_service
+from .dependencies import get_engine, get_intelligence, get_service
 from .schemas import (
     ActorRequest, AssignmentRequest, DependencyRequest, EventOut, ExecutionOut,
     MemberRequest, ProjectCreate, ProjectOut, ProjectUpdate, TaskCreate, TaskOut, TaskUpdate,
-    UserCreate, UserOut, UserUpdate, WorkflowOut,
+    UserCreate, UserOut, UserUpdate, WorkflowOut, IntelligenceActionRequest,
+    IntelligenceAnalyzeRequest, IntelligencePlanRequest,
 )
 
 router = APIRouter()
@@ -228,3 +231,29 @@ def workflow(workflow_id: str) -> WorkflowOut:
 def task_workflow(task_id: str, engine: NEEKAEngine = Depends(get_engine)) -> WorkflowOut:
     engine.get_task(task_id)
     return workflow_out()
+
+
+@router.post("/intelligence/analyze")
+def intelligence_analyze(payload: IntelligenceAnalyzeRequest,
+                         gateway: IntelligenceGateway = Depends(get_intelligence)) -> dict:
+    return gateway.analyze(payload.project_id, payload.mode)
+
+
+@router.post("/intelligence/plan")
+def intelligence_plan(payload: IntelligencePlanRequest,
+                      gateway: IntelligenceGateway = Depends(get_intelligence)) -> dict:
+    return gateway.plan(payload.project_id, payload.goal, payload.mode)
+
+
+@router.post("/intelligence/action")
+def intelligence_action(payload: IntelligenceActionRequest,
+                         gateway: IntelligenceGateway = Depends(get_intelligence)) -> dict:
+    return gateway.execute_action(
+        StructuredAction(action=payload.action, parameters=payload.parameters),
+        payload.mode, payload.approved,
+    )
+
+
+@router.get("/intelligence/audit")
+def intelligence_audit(gateway: IntelligenceGateway = Depends(get_intelligence)) -> list[dict]:
+    return gateway.audit()

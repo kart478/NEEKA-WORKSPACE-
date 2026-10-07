@@ -17,6 +17,9 @@ from neeka.brain.exceptions import (
     UserNotFoundError,
     WorkflowNotFoundError,
 )
+from neeka.intelligence.exceptions import (
+    ApprovalRequiredError, IntelligenceError, UnauthorizedIntelligenceAction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,10 @@ def error_code(error: Exception) -> str:
 
 
 async def neeka_error_handler(_request: Request, error: Exception) -> JSONResponse:
+    if isinstance(error, (ApprovalRequiredError, UnauthorizedIntelligenceAction)):
+        return JSONResponse(status_code=403, content={"error": type(error).__name__, "message": str(error)})
+    if isinstance(error, IntelligenceError):
+        return JSONResponse(status_code=400, content={"error": type(error).__name__, "message": str(error)})
     status = 409 if isinstance(error, (CircularDependencyError, DuplicateMemberError, InvalidTaskTransitionError)) else 404 if isinstance(
         error, (UserNotFoundError, ProjectNotFoundError, TaskNotFoundError, EventNotFoundError,
             AutomationExecutionNotFoundError, WorkflowNotFoundError)

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from neeka.brain.project import ProjectStatus
 from neeka.brain.task import TaskPriority, TaskStatus
 from neeka.brain.user import UserRole
+from neeka.intelligence.permissions import PermissionMode
 
 
 class UserCreate(BaseModel):
@@ -138,3 +139,21 @@ class WorkflowOut(BaseModel):
 class ErrorOut(BaseModel):
     error: str
     message: str
+
+
+class IntelligenceAnalyzeRequest(BaseModel):
+    project_id: str
+    mode: PermissionMode = PermissionMode.READ_ONLY
+
+
+class IntelligencePlanRequest(BaseModel):
+    project_id: str
+    goal: str = Field(min_length=1, max_length=2000)
+    mode: PermissionMode = PermissionMode.READ_ONLY
+
+
+class IntelligenceActionRequest(BaseModel):
+    action: str = Field(min_length=1)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    mode: PermissionMode = PermissionMode.ASSISTED
+    approved: bool = False

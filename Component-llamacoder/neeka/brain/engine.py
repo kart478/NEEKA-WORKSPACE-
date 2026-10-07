@@ -5,6 +5,7 @@ from pathlib import Path
 from neeka.persistence.database import Database
 from neeka.persistence.repositories import EventRepository, ProjectRepository, TaskRepository, UserRepository
 from neeka.persistence.sqlite_repositories import (
+    SQLiteAIAuditRepository,
     SQLiteAutomationExecutionRepository,
     SQLiteEventRepository,
     SQLiteProjectRepository,
@@ -57,6 +58,7 @@ class NEEKAEngine:
         self.tasks = task_repository or SQLiteTaskRepository(self.database)
         self.events = event_repository or SQLiteEventRepository(self.database)
         self.automation_executions = automation_execution_repository or SQLiteAutomationExecutionRepository(self.database)
+        self.ai_audit_repository = SQLiteAIAuditRepository(self.database)
         self.workflow = WorkflowExecutor()
         self.automation = AutomationEngine(self, self.automation_executions)
         self._load()

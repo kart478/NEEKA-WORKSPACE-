@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from neeka.brain.engine import NEEKAEngine
 from neeka.brain.exceptions import NEEKAError
 from neeka.services.control import ControlService
+from neeka.intelligence.gateway import IntelligenceGateway
+from neeka.intelligence.exceptions import IntelligenceError
 from .config import Settings
 from .errors import internal_error_handler, neeka_error_handler
 from .routes import router
@@ -19,6 +21,7 @@ def create_app(db_path: str | None = None, settings: Settings | None = None) -> 
     app = FastAPI(title="NEEKA Work Engine API", version="1.0.0")
     app.state.engine = engine
     app.state.service = ControlService(engine)
+    app.state.intelligence = IntelligenceGateway(engine, audit_repository=engine.ai_audit_repository)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(config.cors_origins),
@@ -40,6 +43,7 @@ def create_app(db_path: str | None = None, settings: Settings | None = None) -> 
         return response
 
     app.add_exception_handler(NEEKAError, neeka_error_handler)
+    app.add_exception_handler(IntelligenceError, neeka_error_handler)
     app.add_exception_handler(Exception, internal_error_handler)
     app.include_router(router, prefix="/api/v1")
 

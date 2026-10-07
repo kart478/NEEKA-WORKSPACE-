@@ -246,3 +246,29 @@ class SQLiteAutomationExecutionRepository:
                 "SELECT * FROM automation_executions ORDER BY started_at, execution_id"
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+class SQLiteAIAuditRepository:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def append(self, record: dict) -> None:
+        with self.database.session() as connection:
+            connection.execute(
+                """INSERT INTO ai_audit_records
+                   (audit_id, provider, operation, action, parameters, permission_mode,
+                    timestamp, success, error, project_id, task_id, execution_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (record["audit_id"], record["provider"], record["operation"], record.get("action"),
+                 json.dumps(record.get("parameters", {})), record["permission_mode"],
+                 record["timestamp"], int(record["success"]), record.get("error"),
+                 record.get("project_id"), record.get("task_id"), record.get("execution_id")),
+            )
+
+    def list(self) -> list[dict]:
+        with self.database.session() as connection:
+            rows = connection.execute("SELECT * FROM ai_audit_records ORDER BY timestamp, audit_id").fetchall()
+        return [
+            {**dict(row), "parameters": json.loads(row["parameters"]), "success": bool(row["success"])}
+            for row in rows
+        ]
