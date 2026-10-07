@@ -110,6 +110,17 @@ class SQLiteProjectRepository:
             ).fetchone()
         return row is not None
 
+    def remove_member(self, project_id: str, user_id: str) -> None:
+        with self.database.session() as connection:
+            connection.execute(
+                "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+                (project_id, user_id),
+            )
+
+    def delete(self, project_id: str) -> None:
+        with self.database.session() as connection:
+            connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
 
 class SQLiteTaskRepository:
     def __init__(self, database: Database) -> None:
@@ -148,6 +159,13 @@ class SQLiteTaskRepository:
         with self.database.session() as connection:
             connection.execute(
                 "INSERT INTO task_dependencies(task_id, depends_on_id) VALUES (?, ?)", (task_id, depends_on_id)
+            )
+
+    def remove_dependency(self, task_id: str, depends_on_id: str) -> None:
+        with self.database.session() as connection:
+            connection.execute(
+                "DELETE FROM task_dependencies WHERE task_id = ? AND depends_on_id = ?",
+                (task_id, depends_on_id),
             )
 
     @staticmethod

@@ -14,6 +14,18 @@ class UserNotFoundError(NEEKAError):
     pass
 
 
+class EventNotFoundError(NEEKAError):
+    pass
+
+
+class AutomationExecutionNotFoundError(NEEKAError):
+    pass
+
+
+class WorkflowNotFoundError(NEEKAError):
+    pass
+
+
 class InvalidTaskTransitionError(NEEKAError):
     pass
 

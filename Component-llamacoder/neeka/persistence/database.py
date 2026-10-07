@@ -12,11 +12,18 @@ class Database:
 
     def __init__(self, path: str | Path = "data/neeka.db") -> None:
         self.path = Path(path)
+        self._memory_connection: sqlite3.Connection | None = None
+        if str(self.path) == ":memory:":
+            self._memory_connection = sqlite3.connect(":memory:")
+            self._memory_connection.row_factory = sqlite3.Row
+            self._memory_connection.execute("PRAGMA foreign_keys = ON")
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
 
     def connect(self) -> sqlite3.Connection:
+        if self._memory_connection is not None:
+            return self._memory_connection
         connection = sqlite3.connect(self.path if str(self.path) != ":memory:" else ":memory:")
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
@@ -32,7 +39,13 @@ class Database:
             connection.rollback()
             raise
         finally:
-            connection.close()
+            if self._memory_connection is None:
+                connection.close()
+
+    def close(self) -> None:
+        if self._memory_connection is not None:
+            self._memory_connection.close()
+            self._memory_connection = None
 
     def initialize(self) -> None:
         with self.session() as connection:

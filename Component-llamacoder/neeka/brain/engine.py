@@ -15,8 +15,10 @@ from neeka.automation.engine import AutomationEngine
 from .event import Event, EventType
 from .exceptions import (
     CircularDependencyError,
+    AutomationExecutionNotFoundError,
     DuplicateMemberError,
     InactiveUserError,
+    EventNotFoundError,
     InvalidProjectMembershipError,
     InvalidTaskTransitionError,
     ProjectNotFoundError,
@@ -68,6 +70,7 @@ class NEEKAEngine:
 
     def close(self) -> None:
         logger.info("NEEKA shutting down")
+        self.database.close()
 
     @staticmethod
     def utcnow() -> datetime:
@@ -84,6 +87,12 @@ class NEEKAEngine:
         if user_id not in self._users:
             raise UserNotFoundError(f"User {user_id} not found")
         return self._users[user_id]
+
+    def list_users(self) -> list[User]:
+        return list(self._users.values())
+
+    def list_users(self) -> list[User]:
+        return list(self._users.values())
 
     def update_user(self, user: User) -> None:
         self.get_user(user.id)
@@ -105,6 +114,65 @@ class NEEKAEngine:
             raise ProjectNotFoundError(f"Project {project_id} not found")
         return self._projects[project_id]
 
+    def list_projects(self) -> list[Project]:
+        return list(self._projects.values())
+
+    def update_project(self, project_id: str, name: str | None = None, description: str | None = None) -> Project:
+        project = self.get_project(project_id)
+        if name is not None:
+            project.name = name
+        if description is not None:
+            project.description = description
+        project.updated_at = datetime.utcnow()
+        self.projects.save(project)
+        return project
+
+    def delete_project(self, project_id: str, actor_id: str) -> None:
+        project = self.get_project(project_id)
+        if project.owner_id != actor_id:
+            raise InvalidProjectMembershipError("Only the project owner can delete a project")
+        self.get_user(actor_id)
+        self.projects.delete(project_id)
+        self._projects.pop(project_id, None)
+        for task_id in project.task_ids:
+            self._tasks.pop(task_id, None)
+
+    def list_projects(self) -> list[Project]:
+        return list(self._projects.values())
+
+    def update_project(self, project_id: str, name: str | None = None, description: str | None = None) -> Project:
+        project = self.get_project(project_id)
+        if name is not None:
+            project.name = name
+        if description is not None:
+            project.description = description
+        project.updated_at = datetime.utcnow()
+        self.projects.save(project)
+        return project
+
+    def delete_project(self, project_id: str, actor_id: str) -> None:
+        project = self.get_project(project_id)
+        if project.owner_id != actor_id:
+            raise InvalidProjectMembershipError("Only the project owner can delete a project")
+        self.get_user(actor_id)
+        self.projects.delete(project_id)
+        self._projects.pop(project_id, None)
+        for task_id in project.task_ids:
+            self._tasks.pop(task_id, None)
+
+    def remove_project_member(self, project_id: str, user_id: str, actor_id: str) -> None:
+        project = self.get_project(project_id)
+        self.get_user(actor_id)
+        if project.owner_id == user_id:
+            raise InvalidProjectMembershipError("The project owner cannot be removed")
+        if not self.projects.has_member(project_id, actor_id):
+            raise InvalidProjectMembershipError(f"Actor {actor_id} is not a project member")
+        if user_id not in project.member_ids:
+            raise InvalidProjectMembershipError(f"User {user_id} is not a project member")
+        self.projects.remove_member(project_id, user_id)
+        project.member_ids.remove(user_id)
+        self._emit_event(EventType.USER_REMOVED_FROM_PROJECT, project_id, actor_id, {"user_id": user_id})
+
     def add_project_member(self, project_id: str, user_id: str, actor_id: str) -> None:
         project = self.get_project(project_id)
         self.get_user(user_id)
@@ -116,6 +184,19 @@ class NEEKAEngine:
         self.projects.add_member(project_id, user_id, "MEMBER")
         project.add_member(user_id)
         self._emit_event(EventType.USER_ADDED_TO_PROJECT, project_id, actor_id, {"user_id": user_id})
+
+    def remove_project_member(self, project_id: str, user_id: str, actor_id: str) -> None:
+        project = self.get_project(project_id)
+        self.get_user(actor_id)
+        if project.owner_id == user_id:
+            raise InvalidProjectMembershipError("The project owner cannot be removed")
+        if not self.projects.has_member(project_id, actor_id):
+            raise InvalidProjectMembershipError(f"Actor {actor_id} is not a project member")
+        if user_id not in project.member_ids:
+            raise InvalidProjectMembershipError(f"User {user_id} is not a project member")
+        self.projects.remove_member(project_id, user_id)
+        project.member_ids.remove(user_id)
+        self._emit_event(EventType.USER_REMOVED_FROM_PROJECT, project_id, actor_id, {"user_id": user_id})
 
     def create_task(
         self,
@@ -144,6 +225,40 @@ class NEEKAEngine:
             raise TaskNotFoundError(f"Task {task_id} not found")
         return self._tasks[task_id]
 
+    def list_tasks(self, project_id: str | None = None) -> list[Task]:
+        return [task for task in self._tasks.values()
+                if project_id is None or task.project_id == project_id]
+
+    def update_task(self, task_id: str, title: str | None = None, description: str | None = None,
+                    priority: TaskPriority | None = None) -> Task:
+        task = self.get_task(task_id)
+        if title is not None:
+            task.title = title
+        if description is not None:
+            task.description = description
+        if priority is not None:
+            task.priority = priority
+        task.updated_at = datetime.utcnow()
+        self.tasks.save(task)
+        return task
+
+    def list_tasks(self, project_id: str | None = None) -> list[Task]:
+        tasks = list(self._tasks.values())
+        return [task for task in tasks if project_id is None or task.project_id == project_id]
+
+    def update_task(self, task_id: str, title: str | None = None, description: str | None = None,
+                    priority: TaskPriority | None = None) -> Task:
+        task = self.get_task(task_id)
+        if title is not None:
+            task.title = title
+        if description is not None:
+            task.description = description
+        if priority is not None:
+            task.priority = priority
+        task.updated_at = datetime.utcnow()
+        self.tasks.save(task)
+        return task
+
     def assign_task(self, task_id: str, user_id: str, actor_id: str) -> None:
         task = self.get_task(task_id)
         user = self.get_user(user_id)
@@ -154,6 +269,8 @@ class NEEKAEngine:
             raise InactiveUserError(f"Cannot assign task to inactive user {user_id}")
         if task.status == TaskStatus.COMPLETED:
             raise InvalidTaskTransitionError("Cannot assign a completed task")
+        if task.assigned_to == user_id:
+            return
         task.assigned_to = user_id
         task.updated_at = datetime.utcnow()
         self.tasks.save(task)
@@ -176,6 +293,25 @@ class NEEKAEngine:
             self.workflow.transition(task, TaskStatus.BLOCKED)
             self.tasks.save(task)
             self._emit_event(EventType.TASK_BLOCKED, task_id, actor_id, {"reason": "dependency_added"})
+
+    def remove_task_dependency(self, task_id: str, depends_on_id: str, actor_id: str) -> None:
+        task = self.get_task(task_id)
+        self.get_task(depends_on_id)
+        self.get_user(actor_id)
+        if depends_on_id not in task.dependency_ids:
+            return
+        self.tasks.remove_dependency(task_id, depends_on_id)
+        task.dependency_ids.remove(depends_on_id)
+        if task.status == TaskStatus.BLOCKED and task.dependencies_satisfied(self._tasks):
+            self.workflow.transition(task, TaskStatus.READY)
+        self.tasks.save(task)
+
+    def block_task(self, task_id: str, actor_id: str) -> None:
+        task = self.get_task(task_id)
+        self.get_user(actor_id)
+        self._transition_task(task, TaskStatus.BLOCKED)
+        self.tasks.save(task)
+        self._emit_event(EventType.TASK_BLOCKED, task_id, actor_id, {"reason": "manual"})
 
     def _would_cycle(self, task_id: str, depends_on_id: str) -> bool:
         seen: set[str] = set()
@@ -206,6 +342,8 @@ class NEEKAEngine:
     def complete_task(self, task_id: str, actor_id: str) -> None:
         task = self.get_task(task_id)
         self.get_user(actor_id)
+        if task.status == TaskStatus.COMPLETED:
+            return
         self._transition_task(task, TaskStatus.COMPLETED)
         task.completed_at = datetime.utcnow()
         self.tasks.save(task)
@@ -263,6 +401,25 @@ class NEEKAEngine:
 
     def get_events(self) -> list[Event]:
         return self._events.copy()
+
+    def get_event(self, event_id: str) -> Event:
+        for event in self._events:
+            if event.id == event_id:
+                return event
+        raise EventNotFoundError(f"Event {event_id} not found")
+
+    def list_automation_executions(self) -> list[dict]:
+        return self.automation_executions.list()
+
+    def retry_automation(self, execution_id: str) -> dict:
+        record = next((item for item in self.automation_executions.list()
+                       if item["execution_id"] == execution_id), None)
+        if record is None:
+            raise AutomationExecutionNotFoundError(f"Automation execution {execution_id} not found")
+        event = self.get_event(record["event_id"])
+        self.automation.process_event(event, retry_failed=True)
+        return next(item for item in self.automation_executions.list()
+                    if item["execution_id"] == execution_id)
 
     def get_project_tasks(self, project_id: str) -> list[Task]:
         project = self.get_project(project_id)
