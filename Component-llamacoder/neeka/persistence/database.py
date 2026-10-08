@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Database:
@@ -56,6 +56,7 @@ class Database:
                 connection.execute("INSERT INTO schema_version(version) VALUES (?)", (SCHEMA_VERSION,))
                 self._migration_v2(connection)
                 self._migration_v3(connection)
+                self._migration_v4(connection)
             else:
                 version = current["version"]
                 if version < 2:
@@ -64,6 +65,9 @@ class Database:
                 if version < 3:
                     self._migration_v3(connection)
                     version = 3
+                if version < 4:
+                    self._migration_v4(connection)
+                    version = 4
                 connection.execute("UPDATE schema_version SET version = ?", (version,))
 
     @staticmethod
@@ -132,5 +136,71 @@ class Database:
                 project_id TEXT, task_id TEXT, execution_id TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_ai_audit_timestamp ON ai_audit_records(timestamp);
+            """
+        )
+
+    @staticmethod
+    def _migration_v4(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS documents (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
+                description TEXT NOT NULL, content TEXT NOT NULL, document_type TEXT NOT NULL,
+                status TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, version INTEGER NOT NULL, metadata TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS document_versions (
+                id TEXT PRIMARY KEY, document_id TEXT NOT NULL, version INTEGER NOT NULL,
+                content TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                metadata TEXT NOT NULL, UNIQUE(document_id, version),
+                FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS requirements (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
+                description TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL,
+                source TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS decisions (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
+                decision TEXT NOT NULL, reason TEXT NOT NULL, alternatives_considered TEXT NOT NULL,
+                status TEXT NOT NULL, superseded_by TEXT, created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id), FOREIGN KEY(superseded_by) REFERENCES decisions(id)
+            );
+            CREATE TABLE IF NOT EXISTS notes (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
+                content TEXT NOT NULL, author TEXT NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(author) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS "references" (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
+                url TEXT NOT NULL, description TEXT NOT NULL, source_type TEXT NOT NULL,
+                created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE IF NOT EXISTS entity_tags (
+                entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, tag_id TEXT NOT NULL,
+                PRIMARY KEY(entity_type, entity_id, tag_id), FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS knowledge_relationships (
+                id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+                relationship TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+                UNIQUE(source_type, source_id, relationship, target_type, target_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
+            CREATE INDEX IF NOT EXISTS idx_requirements_project ON requirements(project_id);
+            CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project_id);
+            CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project_id);
+            CREATE INDEX IF NOT EXISTS idx_references_project ON "references"(project_id);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_relationship_source ON knowledge_relationships(source_type, source_id);
             """
         )

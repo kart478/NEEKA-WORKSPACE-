@@ -4,6 +4,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, ValidationError
 
 from neeka.brain.task import TaskPriority
+from neeka.knowledge.context import KnowledgeContextBuilder
 from .exceptions import ToolValidationError, UnknownToolError
 
 
@@ -13,6 +14,7 @@ class EmptyInput(BaseModel):
 
 class ProjectInput(BaseModel):
     project_id: str
+    actor_id: str | None = None
 
 
 class TaskInput(BaseModel):
@@ -103,6 +105,9 @@ class ToolRegistry:
              "actor_id": x.actor_id, "metadata": x.metadata, "timestamp": x.timestamp.isoformat()}
             for x in e.get_events() if x.source_entity == p["project_id"]
         ]))
+        self.register(ToolDefinition("get_project_knowledge", ProjectInput, False, lambda e, p: KnowledgeContextBuilder().build(
+            e.get_project_knowledge(p["project_id"], p.get("actor_id") or e.get_project(p["project_id"]).owner_id)
+        )))
         self.register(ToolDefinition("get_task_dependencies", TaskInput, False, lambda e, p: [
             _model(e.get_task(task_id)) for task_id in e.get_task(p["task_id"]).dependency_ids
         ]))

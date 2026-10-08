@@ -13,5 +13,11 @@ malformed parameters, invalid IDs, and Brain validation failures are rejected.
 Every attempt is written to the AI audit repository.
 
 The current knowledge foundation is deliberately small. Project context can be
-extended later with documentation, decisions, references, or a retrieval layer
-without allowing an AI provider to access the database directly.
+now include bounded documents, requirements, decisions, notes, and references
+as separate structured collections. Read-only knowledge tools call the Brain
+query surface and respect project membership. This keeps project knowledge
+owned by NEEKA rather than by the AI provider.
+
+Search is currently SQLite keyword search. Embeddings, vector indexes, cloud
+document storage, and full RAG retrieval are intentionally deferred to a later
+architecture step.

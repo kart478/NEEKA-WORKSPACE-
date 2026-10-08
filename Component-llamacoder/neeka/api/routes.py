@@ -10,12 +10,19 @@ from neeka.services.control import ControlService
 from neeka.intelligence.gateway import IntelligenceGateway, StructuredAction
 from neeka.intelligence.permissions import PermissionMode
 from neeka.workflow.definitions import STANDARD_TASK_WORKFLOW
+from neeka.knowledge.decision import Decision
+from neeka.knowledge.document import Document
+from neeka.knowledge.note import Note
+from neeka.knowledge.reference import Reference
+from neeka.knowledge.requirement import Requirement
 from .dependencies import get_engine, get_intelligence, get_service
 from .schemas import (
     ActorRequest, AssignmentRequest, DependencyRequest, EventOut, ExecutionOut,
     MemberRequest, ProjectCreate, ProjectOut, ProjectUpdate, TaskCreate, TaskOut, TaskUpdate,
     UserCreate, UserOut, UserUpdate, WorkflowOut, IntelligenceActionRequest,
     IntelligenceAnalyzeRequest, IntelligencePlanRequest,
+    DecisionCreate, DecisionOut, DocumentCreate, DocumentOut, DocumentUpdate,
+    NoteCreate, NoteOut, ReferenceCreate, ReferenceOut, RequirementCreate, RequirementOut,
 )
 
 router = APIRouter()
@@ -73,6 +80,85 @@ def list_projects(engine: NEEKAEngine = Depends(get_engine)) -> list[Project]:
 @router.get("/projects/{project_id}", response_model=ProjectOut)
 def get_project(project_id: str, engine: NEEKAEngine = Depends(get_engine)) -> Project:
     return engine.get_project(project_id)
+
+
+@router.post("/projects/{project_id}/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
+def create_document(project_id: str, payload: DocumentCreate, engine: NEEKAEngine = Depends(get_engine)) -> Document:
+    engine.get_project(project_id)
+    return engine.create_document(Document(project_id, payload.title, payload.description, payload.content,
+                                           payload.document_type, payload.status, payload.actor_id,
+                                           metadata=payload.metadata), payload.actor_id)
+
+
+@router.get("/projects/{project_id}/documents", response_model=list[DocumentOut])
+def list_documents(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[Document]:
+    return engine.list_documents(project_id, actor_id)
+
+
+@router.get("/documents/{document_id}", response_model=DocumentOut)
+def get_document(document_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> Document:
+    return engine.get_document(document_id, actor_id)
+
+
+@router.patch("/documents/{document_id}", response_model=DocumentOut)
+def update_document(document_id: str, payload: DocumentUpdate, engine: NEEKAEngine = Depends(get_engine)) -> Document:
+    changes = payload.model_dump(exclude={"actor_id"}, exclude_unset=True)
+    return engine.update_document(document_id, payload.actor_id, **changes)
+
+
+@router.post("/projects/{project_id}/requirements", response_model=RequirementOut, status_code=status.HTTP_201_CREATED)
+def create_requirement(project_id: str, payload: RequirementCreate, engine: NEEKAEngine = Depends(get_engine)) -> Requirement:
+    return engine.create_requirement(Requirement(project_id, payload.title, payload.description, payload.actor_id,
+                                                payload.priority, source=payload.source), payload.actor_id)
+
+
+@router.get("/projects/{project_id}/requirements", response_model=list[RequirementOut])
+def list_requirements(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[Requirement]:
+    return engine.list_requirements(project_id, actor_id)
+
+
+@router.post("/projects/{project_id}/decisions", response_model=DecisionOut, status_code=status.HTTP_201_CREATED)
+def create_decision(project_id: str, payload: DecisionCreate, engine: NEEKAEngine = Depends(get_engine)) -> Decision:
+    return engine.create_decision(Decision(project_id, payload.title, payload.decision, payload.reason, payload.actor_id,
+                                           payload.alternatives_considered, payload.status), payload.actor_id)
+
+
+@router.get("/projects/{project_id}/decisions", response_model=list[DecisionOut])
+def list_decisions(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[Decision]:
+    return engine.list_decisions(project_id, actor_id)
+
+
+@router.post("/projects/{project_id}/notes", response_model=NoteOut, status_code=status.HTTP_201_CREATED)
+def create_note(project_id: str, payload: NoteCreate, engine: NEEKAEngine = Depends(get_engine)) -> Note:
+    return engine.create_note(Note(project_id, payload.title, payload.content, payload.actor_id, payload.tags), payload.actor_id)
+
+
+@router.get("/projects/{project_id}/notes", response_model=list[NoteOut])
+def list_notes(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[Note]:
+    return engine.list_notes(project_id, actor_id)
+
+
+@router.post("/projects/{project_id}/references", response_model=ReferenceOut, status_code=status.HTTP_201_CREATED)
+def create_reference(project_id: str, payload: ReferenceCreate, engine: NEEKAEngine = Depends(get_engine)) -> Reference:
+    return engine.create_reference(Reference(project_id, payload.title, payload.url, payload.description,
+                                              payload.source_type, payload.actor_id), payload.actor_id)
+
+
+@router.get("/projects/{project_id}/references", response_model=list[ReferenceOut])
+def list_references(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[Reference]:
+    return engine.list_references(project_id, actor_id)
+
+
+@router.get("/projects/{project_id}/knowledge")
+def project_knowledge(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> dict:
+    return engine.get_project_knowledge(project_id, actor_id).as_dict()
+
+
+@router.get("/projects/{project_id}/knowledge/search")
+def search_knowledge(project_id: str, keyword: str = Query(..., min_length=1), actor_id: str = Query(...),
+                     type: str | None = Query(default=None), status: str | None = Query(default=None),
+                     engine: NEEKAEngine = Depends(get_engine)) -> list[dict]:
+    return engine.search_knowledge(project_id, actor_id, keyword, type, status)
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectOut)

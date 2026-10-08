@@ -186,7 +186,10 @@ class SQLiteEventRepository:
                 """INSERT INTO events(event_id, event_type, timestamp, actor_id, entity_type, entity_id, metadata)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (event.id, event.event_type.value, event.timestamp.isoformat(), event.actor_id,
-                 "task" if event.event_type.value.startswith("TASK") else "project",
+                 "task" if event.event_type.value.startswith("TASK") else
+                 "knowledge" if event.event_type.value.split("_")[0] in {
+                     "DOCUMENT", "REQUIREMENT", "DECISION", "NOTE", "REFERENCE"
+                 } else "project",
                  event.source_entity, json.dumps(event.metadata)),
             )
 

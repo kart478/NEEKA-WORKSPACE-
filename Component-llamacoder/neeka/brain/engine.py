@@ -4,6 +4,14 @@ from pathlib import Path
 
 from neeka.persistence.database import Database
 from neeka.persistence.repositories import EventRepository, ProjectRepository, TaskRepository, UserRepository
+from neeka.knowledge.decision import Decision
+from neeka.knowledge.document import Document
+from neeka.knowledge.note import Note
+from neeka.knowledge.reference import Reference
+from neeka.knowledge.repositories.base import KnowledgeRepository
+from neeka.knowledge.repositories.sqlite import SQLiteKnowledgeRepository
+from neeka.knowledge.requirement import Requirement
+from neeka.knowledge.services import KnowledgeService
 from neeka.persistence.sqlite_repositories import (
     SQLiteAIAuditRepository,
     SQLiteAutomationExecutionRepository,
@@ -47,6 +55,7 @@ class NEEKAEngine:
         task_repository: TaskRepository | None = None,
         event_repository: EventRepository | None = None,
         automation_execution_repository=None,
+        knowledge_repository: KnowledgeRepository | None = None,
     ) -> None:
         self.database = Database(db_path)
         self._users: dict[str, User] = {}
@@ -59,6 +68,8 @@ class NEEKAEngine:
         self.events = event_repository or SQLiteEventRepository(self.database)
         self.automation_executions = automation_execution_repository or SQLiteAutomationExecutionRepository(self.database)
         self.ai_audit_repository = SQLiteAIAuditRepository(self.database)
+        self.knowledge_repository = knowledge_repository or SQLiteKnowledgeRepository(self.database)
+        self.knowledge = KnowledgeService(self.knowledge_repository, self._can_access_knowledge)
         self.workflow = WorkflowExecutor()
         self.automation = AutomationEngine(self, self.automation_executions)
         self._load()
@@ -73,6 +84,90 @@ class NEEKAEngine:
     def close(self) -> None:
         logger.info("NEEKA shutting down")
         self.database.close()
+
+    def _can_access_knowledge(self, project_id: str, actor_id: str) -> bool:
+        project = self._projects.get(project_id)
+        return project is not None and actor_id in project.member_ids
+
+    def create_document(self, document: Document, actor_id: str) -> Document:
+        result = self.knowledge.create_document(document, actor_id)
+        self._emit_event(EventType.DOCUMENT_CREATED, result.id, actor_id, {"project_id": result.project_id})
+        self._emit_event(EventType.DOCUMENT_VERSION_CREATED, result.id, actor_id, {"project_id": result.project_id, "version": result.version})
+        return result
+
+    def update_document(self, document_id: str, actor_id: str, **changes) -> Document:
+        result = self.knowledge.update_document(document_id, actor_id, **changes)
+        self._emit_event(EventType.DOCUMENT_UPDATED, result.id, actor_id, {"project_id": result.project_id})
+        self._emit_event(EventType.DOCUMENT_VERSION_CREATED, result.id, actor_id, {"project_id": result.project_id, "version": result.version})
+        return result
+
+    def get_document(self, document_id: str, actor_id: str) -> Document:
+        document = self.knowledge_repository.get_document(document_id)
+        if document is None:
+            raise KeyError(document_id)
+        self.knowledge._check(document.project_id, actor_id)
+        return document
+
+    def list_documents(self, project_id: str, actor_id: str) -> list[Document]:
+        self.knowledge._check(project_id, actor_id)
+        return self.knowledge_repository.list_documents(project_id)
+
+    def document_versions(self, document_id: str, actor_id: str):
+        document = self.get_document(document_id, actor_id)
+        return self.knowledge_repository.list_document_versions(document.id)
+
+    def create_requirement(self, item: Requirement, actor_id: str) -> Requirement:
+        result = self.knowledge.create_requirement(item, actor_id)
+        self._emit_event(EventType.REQUIREMENT_CREATED, result.id, actor_id, {"project_id": result.project_id})
+        return result
+
+    def list_requirements(self, project_id: str, actor_id: str) -> list[Requirement]:
+        self.knowledge._check(project_id, actor_id)
+        return self.knowledge_repository.list_requirements(project_id)
+
+    def create_decision(self, item: Decision, actor_id: str) -> Decision:
+        result = self.knowledge.create_decision(item, actor_id)
+        self._emit_event(EventType.DECISION_CREATED, result.id, actor_id, {"project_id": result.project_id})
+        return result
+
+    def list_decisions(self, project_id: str, actor_id: str) -> list[Decision]:
+        self.knowledge._check(project_id, actor_id)
+        return self.knowledge_repository.list_decisions(project_id)
+
+    def update_decision(self, decision_id: str, project_id: str, actor_id: str, **changes) -> Decision:
+        result = self.knowledge.update_decision(decision_id, actor_id, project_id=project_id, **changes)
+        event_type = EventType.DECISION_SUPERSEDED if result.status.value == "SUPERSEDED" else EventType.DECISION_ACCEPTED if result.status.value == "ACCEPTED" else EventType.DECISION_REJECTED if result.status.value == "REJECTED" else EventType.DECISION_CREATED
+        self._emit_event(event_type, result.id, actor_id, {"project_id": result.project_id})
+        return result
+
+    def add_knowledge_relationship(self, project_id: str, actor_id: str, source_type: str, source_id: str,
+                                    relationship: str, target_type: str, target_id: str) -> None:
+        self.knowledge.add_relationship(project_id, actor_id, source_type, source_id, relationship, target_type, target_id)
+
+    def create_note(self, item: Note, actor_id: str) -> Note:
+        result = self.knowledge.create_note(item, actor_id)
+        self._emit_event(EventType.NOTE_CREATED, result.id, actor_id, {"project_id": result.project_id})
+        return result
+
+    def list_notes(self, project_id: str, actor_id: str) -> list[Note]:
+        self.knowledge._check(project_id, actor_id)
+        return self.knowledge_repository.list_notes(project_id)
+
+    def create_reference(self, item: Reference, actor_id: str) -> Reference:
+        result = self.knowledge.create_reference(item, actor_id)
+        self._emit_event(EventType.REFERENCE_CREATED, result.id, actor_id, {"project_id": result.project_id})
+        return result
+
+    def list_references(self, project_id: str, actor_id: str) -> list[Reference]:
+        self.knowledge._check(project_id, actor_id)
+        return self.knowledge_repository.list_references(project_id)
+
+    def get_project_knowledge(self, project_id: str, actor_id: str):
+        return self.knowledge.project(project_id, actor_id)
+
+    def search_knowledge(self, project_id: str, actor_id: str, keyword: str, type: str | None = None, status: str | None = None) -> list[dict]:
+        self.knowledge._check(project_id, actor_id)
+        return self.knowledge_repository.search(project_id, keyword, type, status)
 
     @staticmethod
     def utcnow() -> datetime:

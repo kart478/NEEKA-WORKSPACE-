@@ -7,6 +7,9 @@ from neeka.brain.project import ProjectStatus
 from neeka.brain.task import TaskPriority, TaskStatus
 from neeka.brain.user import UserRole
 from neeka.intelligence.permissions import PermissionMode
+from neeka.knowledge.decision import DecisionStatus
+from neeka.knowledge.document import DocumentStatus, DocumentType
+from neeka.knowledge.requirement import RequirementPriority, RequirementStatus
 
 
 class UserCreate(BaseModel):
@@ -157,3 +160,124 @@ class IntelligenceActionRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     mode: PermissionMode = PermissionMode.ASSISTED
     approved: bool = False
+
+
+class DocumentCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    description: str = ""
+    content: str = ""
+    document_type: DocumentType = DocumentType.OTHER
+    status: DocumentStatus = DocumentStatus.DRAFT
+    actor_id: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    description: str | None = None
+    content: str | None = None
+    document_type: DocumentType | None = None
+    status: DocumentStatus | None = None
+    metadata: dict[str, Any] | None = None
+    actor_id: str
+
+
+class DocumentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    title: str
+    description: str
+    content: str
+    document_type: DocumentType
+    status: DocumentStatus
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    version: int
+    metadata: dict[str, Any]
+
+
+class RequirementCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    description: str = ""
+    priority: RequirementPriority = RequirementPriority.MEDIUM
+    source: str = ""
+    actor_id: str
+
+
+class RequirementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    title: str
+    description: str
+    priority: RequirementPriority
+    status: RequirementStatus
+    source: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DecisionCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    decision: str = Field(min_length=1)
+    reason: str = ""
+    alternatives_considered: list[str] = Field(default_factory=list)
+    status: DecisionStatus = DecisionStatus.PROPOSED
+    actor_id: str
+
+
+class DecisionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    title: str
+    decision: str
+    reason: str
+    alternatives_considered: list[str]
+    status: DecisionStatus
+    superseded_by: str | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class NoteCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    content: str = ""
+    tags: list[str] = Field(default_factory=list)
+    actor_id: str
+
+
+class NoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    title: str
+    content: str
+    author: str
+    tags: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReferenceCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    url: str
+    description: str = ""
+    source_type: str = "OTHER"
+    actor_id: str
+
+
+class ReferenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    title: str
+    url: str
+    description: str
+    source_type: str
+    created_by: str
+    created_at: datetime
