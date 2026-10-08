@@ -28,3 +28,12 @@ creates the knowledge tables and indexes without replacing prior migrations.
 The API exposes project-scoped CRUD and local keyword search under `/api/v1`.
 Intelligence receives bounded structured knowledge through `ContextBuilder`;
 providers and tools never receive direct database access.
+
+## Part 7: Workspace Artifacts
+
+Artifacts are the actual files and outputs associated with projects and tasks,
+separate from Knowledge. `ArtifactService` coordinates the v5 SQLite
+repository and replaceable `ArtifactStorage` abstraction. The initial storage
+implementation is local, application-managed, path-validated, checksum-aware,
+and uses atomic writes. Artifact access inherits project membership and emits
+events through the existing Brain event pipeline.

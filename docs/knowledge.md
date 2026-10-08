@@ -34,3 +34,6 @@ Intelligence Layer. The current implementation deliberately has no vector
 database, embeddings, cloud file storage, or unrestricted AI retrieval. A later
 step can add document adapters and a retrieval index behind the same knowledge
 service without changing the Brain or giving providers database access.
+
+Knowledge documents can reference underlying Workspace Artifacts through the
+artifact relationship abstraction, without duplicating file content.

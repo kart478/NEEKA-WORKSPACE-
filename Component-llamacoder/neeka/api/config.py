@@ -14,3 +14,4 @@ class Settings:
             "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
         ).split(",") if item.strip()
     )
+    artifact_max_size: int = int(os.getenv("ARTIFACT_MAX_SIZE", str(50 * 1024 * 1024)))

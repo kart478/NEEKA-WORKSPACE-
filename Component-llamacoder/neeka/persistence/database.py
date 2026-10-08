@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class Database:
@@ -57,6 +57,7 @@ class Database:
                 self._migration_v2(connection)
                 self._migration_v3(connection)
                 self._migration_v4(connection)
+                self._migration_v5(connection)
             else:
                 version = current["version"]
                 if version < 2:
@@ -68,6 +69,9 @@ class Database:
                 if version < 4:
                     self._migration_v4(connection)
                     version = 4
+                if version < 5:
+                    self._migration_v5(connection)
+                    version = 5
                 connection.execute("UPDATE schema_version SET version = ?", (version,))
 
     @staticmethod
@@ -202,5 +206,39 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project_id);
             CREATE INDEX IF NOT EXISTS idx_references_project ON "references"(project_id);
             CREATE INDEX IF NOT EXISTS idx_knowledge_relationship_source ON knowledge_relationships(source_type, source_id);
+            """
+        )
+
+    @staticmethod
+    def _migration_v5(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS artifacts (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL,
+                description TEXT NOT NULL, artifact_type TEXT NOT NULL, mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL CHECK(size >= 0), storage_key TEXT NOT NULL UNIQUE,
+                checksum TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, status TEXT NOT NULL, metadata TEXT NOT NULL,
+                current_version INTEGER NOT NULL CHECK(current_version >= 1),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS artifact_versions (
+                id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, version_number INTEGER NOT NULL,
+                storage_key TEXT NOT NULL UNIQUE, size INTEGER NOT NULL CHECK(size >= 0),
+                checksum TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                UNIQUE(artifact_id, version_number),
+                FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS artifact_relationships (
+                artifact_id TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+                role TEXT NOT NULL, PRIMARY KEY(artifact_id, target_type, target_id, role),
+                FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
+            CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact ON artifact_versions(artifact_id, version_number);
+            CREATE INDEX IF NOT EXISTS idx_artifact_relationship_target ON artifact_relationships(target_type, target_id);
+            CREATE INDEX IF NOT EXISTS idx_artifacts_checksum ON artifacts(project_id, checksum);
             """
         )

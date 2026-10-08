@@ -17,7 +17,7 @@ from .routes import router
 
 def create_app(db_path: str | None = None, settings: Settings | None = None) -> FastAPI:
     config = settings or Settings()
-    engine = NEEKAEngine(db_path or config.database_url)
+    engine = NEEKAEngine(db_path or config.database_url, artifact_max_size=config.artifact_max_size)
     app = FastAPI(title="NEEKA Work Engine API", version="1.0.0")
     app.state.engine = engine
     app.state.service = ControlService(engine)

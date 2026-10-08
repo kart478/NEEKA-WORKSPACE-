@@ -21,6 +21,11 @@ class TaskInput(BaseModel):
     task_id: str
 
 
+class ArtifactInput(BaseModel):
+    artifact_id: str
+    actor_id: str
+
+
 class CreateTaskInput(BaseModel):
     project_id: str
     title: str
@@ -108,6 +113,17 @@ class ToolRegistry:
         self.register(ToolDefinition("get_project_knowledge", ProjectInput, False, lambda e, p: KnowledgeContextBuilder().build(
             e.get_project_knowledge(p["project_id"], p.get("actor_id") or e.get_project(p["project_id"]).owner_id)
         )))
+        self.register(ToolDefinition("list_project_artifacts", ProjectInput, False, lambda e, p: [
+            _model(item) for item in e.list_artifacts(p["project_id"], p.get("actor_id") or e.get_project(p["project_id"]).owner_id)
+        ]))
+        self.register(ToolDefinition("get_artifact_metadata", ArtifactInput, False, lambda e, p:
+            e.artifacts.extract_metadata(p["artifact_id"], p["actor_id"])))
+        self.register(ToolDefinition("list_artifact_versions", ArtifactInput, False, lambda e, p: [
+            _model(item) for item in e.artifact_versions(p["artifact_id"], p["actor_id"])
+        ]))
+        self.register(ToolDefinition("get_artifact_relationships", ArtifactInput, False, lambda e, p: [
+            _model(item) for item in e.artifact_relationships(p["artifact_id"], p["actor_id"])
+        ]))
         self.register(ToolDefinition("get_task_dependencies", TaskInput, False, lambda e, p: [
             _model(e.get_task(task_id)) for task_id in e.get_task(p["task_id"]).dependency_ids
         ]))

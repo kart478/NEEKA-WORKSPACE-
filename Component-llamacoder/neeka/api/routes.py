@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, Query, status
+import json
+
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from neeka.brain.engine import NEEKAEngine
 from neeka.brain.event import Event
@@ -15,6 +18,8 @@ from neeka.knowledge.document import Document
 from neeka.knowledge.note import Note
 from neeka.knowledge.reference import Reference
 from neeka.knowledge.requirement import Requirement
+from neeka.artifacts.artifact import Artifact, ArtifactType
+from neeka.artifacts.relationships import ArtifactRole
 from .dependencies import get_engine, get_intelligence, get_service
 from .schemas import (
     ActorRequest, AssignmentRequest, DependencyRequest, EventOut, ExecutionOut,
@@ -23,6 +28,7 @@ from .schemas import (
     IntelligenceAnalyzeRequest, IntelligencePlanRequest,
     DecisionCreate, DecisionOut, DocumentCreate, DocumentOut, DocumentUpdate,
     NoteCreate, NoteOut, ReferenceCreate, ReferenceOut, RequirementCreate, RequirementOut,
+    ArtifactAttachRequest, ArtifactOut, ArtifactVersionOut,
 )
 
 router = APIRouter()
@@ -80,6 +86,89 @@ def list_projects(engine: NEEKAEngine = Depends(get_engine)) -> list[Project]:
 @router.get("/projects/{project_id}", response_model=ProjectOut)
 def get_project(project_id: str, engine: NEEKAEngine = Depends(get_engine)) -> Project:
     return engine.get_project(project_id)
+
+
+@router.post("/projects/{project_id}/artifacts", response_model=ArtifactOut, status_code=status.HTTP_201_CREATED)
+def upload_artifact(project_id: str, file: UploadFile = File(...), actor_id: str = Form(...),
+                    description: str = Form(default=""), artifact_type: ArtifactType = Form(default=ArtifactType.OTHER),
+                    metadata: str = Form(default="{}"), engine: NEEKAEngine = Depends(get_engine)) -> Artifact:
+    return engine.create_artifact(project_id, file.filename or "unnamed", description, artifact_type,
+                                   file.content_type or "application/octet-stream", file.file, actor_id, json.loads(metadata))
+
+
+@router.get("/projects/{project_id}/artifacts", response_model=list[ArtifactOut])
+def list_artifacts(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[Artifact]:
+    return engine.list_artifacts(project_id, actor_id)
+
+
+@router.get("/artifacts/{artifact_id}", response_model=ArtifactOut)
+def get_artifact(artifact_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> Artifact:
+    return engine.get_artifact(artifact_id, actor_id)
+
+
+@router.get("/artifacts/{artifact_id}/versions", response_model=list[ArtifactVersionOut])
+def artifact_versions(artifact_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)):
+    return engine.artifact_versions(artifact_id, actor_id)
+
+
+@router.post("/artifacts/{artifact_id}/versions", response_model=ArtifactOut, status_code=status.HTTP_201_CREATED)
+def upload_artifact_version(artifact_id: str, file: UploadFile = File(...), actor_id: str = Form(...),
+                             metadata: str = Form(default="{}"), engine: NEEKAEngine = Depends(get_engine)) -> Artifact:
+    return engine.create_artifact_version(artifact_id, file.file, actor_id, json.loads(metadata))
+
+
+@router.post("/artifacts/{artifact_id}/versions/{version_number}/restore", response_model=ArtifactOut)
+def restore_artifact_version(artifact_id: str, version_number: int, actor_id: str = Query(...),
+                             engine: NEEKAEngine = Depends(get_engine)) -> Artifact:
+    return engine.restore_artifact_version(artifact_id, version_number, actor_id)
+
+
+@router.get("/artifacts/{artifact_id}/download")
+def download_artifact(artifact_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> StreamingResponse:
+    artifact = engine.get_artifact(artifact_id, actor_id)
+    stream = engine.read_artifact(artifact_id, actor_id)
+    return StreamingResponse(stream, media_type=artifact.mime_type,
+                             headers={"Content-Disposition": f'attachment; filename="{artifact.name}"'})
+
+
+@router.delete("/artifacts/{artifact_id}", response_model=ArtifactOut)
+def delete_artifact(artifact_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> Artifact:
+    return engine.delete_artifact(artifact_id, actor_id)
+
+
+@router.post("/artifacts/{artifact_id}/relationships")
+def attach_artifact(artifact_id: str, payload: ArtifactAttachRequest, engine: NEEKAEngine = Depends(get_engine)) -> dict:
+    relationship = engine.attach_artifact(artifact_id, payload.target_type, payload.target_id, payload.role, payload.actor_id)
+    return {"artifact_id": relationship.artifact_id, "target_type": relationship.target_type,
+            "target_id": relationship.target_id, "role": relationship.role.value}
+
+
+@router.get("/artifacts/{artifact_id}/relationships")
+def artifact_relationships(artifact_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[dict]:
+    return [{"artifact_id": item.artifact_id, "target_type": item.target_type,
+             "target_id": item.target_id, "role": item.role.value}
+            for item in engine.artifact_relationships(artifact_id, actor_id)]
+
+@router.delete("/artifacts/{artifact_id}/relationships", status_code=status.HTTP_204_NO_CONTENT)
+def detach_artifact(artifact_id: str, payload: ArtifactAttachRequest,
+                    engine: NEEKAEngine = Depends(get_engine)) -> None:
+    engine.detach_artifact(artifact_id, payload.target_type, payload.target_id, payload.role, payload.actor_id)
+
+
+@router.post("/tasks/{task_id}/artifacts", response_model=ArtifactOut, status_code=status.HTTP_201_CREATED)
+def upload_task_artifact(task_id: str, file: UploadFile = File(...), actor_id: str = Form(...),
+                         description: str = Form(default=""), artifact_type: ArtifactType = Form(default=ArtifactType.OTHER),
+                         metadata: str = Form(default="{}"), engine: NEEKAEngine = Depends(get_engine)) -> Artifact:
+    task = engine.get_task(task_id)
+    artifact = engine.create_artifact(task.project_id, file.filename or "unnamed", description, artifact_type,
+                                      file.content_type or "application/octet-stream", file.file, actor_id, json.loads(metadata))
+    engine.attach_artifact(artifact.id, "task", task_id, ArtifactRole.ATTACHMENT, actor_id)
+    return artifact
+
+
+@router.get("/tasks/{task_id}/artifacts", response_model=list[ArtifactOut])
+def task_artifacts(task_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[Artifact]:
+    return engine.task_artifacts(task_id, actor_id)
 
 
 @router.post("/projects/{project_id}/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)

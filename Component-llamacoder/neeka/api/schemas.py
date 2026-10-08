@@ -10,6 +10,8 @@ from neeka.intelligence.permissions import PermissionMode
 from neeka.knowledge.decision import DecisionStatus
 from neeka.knowledge.document import DocumentStatus, DocumentType
 from neeka.knowledge.requirement import RequirementPriority, RequirementStatus
+from neeka.artifacts.artifact import ArtifactStatus, ArtifactType
+from neeka.artifacts.relationships import ArtifactRole
 
 
 class UserCreate(BaseModel):
@@ -281,3 +283,39 @@ class ReferenceOut(BaseModel):
     source_type: str
     created_by: str
     created_at: datetime
+
+
+class ArtifactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    name: str
+    description: str
+    artifact_type: ArtifactType
+    mime_type: str
+    size: int
+    checksum: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    status: ArtifactStatus
+    metadata: dict[str, Any]
+    current_version: int
+
+
+class ArtifactVersionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    artifact_id: str
+    version_number: int
+    size: int
+    checksum: str
+    created_by: str
+    created_at: datetime
+
+
+class ArtifactAttachRequest(BaseModel):
+    target_type: str = Field(min_length=1, max_length=50)
+    target_id: str
+    role: ArtifactRole = ArtifactRole.ATTACHMENT
+    actor_id: str

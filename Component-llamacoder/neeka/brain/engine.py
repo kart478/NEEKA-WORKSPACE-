@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import BinaryIO
 
 from neeka.persistence.database import Database
 from neeka.persistence.repositories import EventRepository, ProjectRepository, TaskRepository, UserRepository
@@ -12,6 +13,12 @@ from neeka.knowledge.repositories.base import KnowledgeRepository
 from neeka.knowledge.repositories.sqlite import SQLiteKnowledgeRepository
 from neeka.knowledge.requirement import Requirement
 from neeka.knowledge.services import KnowledgeService
+from neeka.artifacts.artifact import Artifact, ArtifactType
+from neeka.artifacts.repositories.base import ArtifactRepository
+from neeka.artifacts.repositories.sqlite import SQLiteArtifactRepository
+from neeka.artifacts.relationships import ArtifactRelationship, ArtifactRole
+from neeka.artifacts.services import ArtifactService
+from neeka.artifacts.storage import LocalArtifactStorage
 from neeka.persistence.sqlite_repositories import (
     SQLiteAIAuditRepository,
     SQLiteAutomationExecutionRepository,
@@ -56,6 +63,9 @@ class NEEKAEngine:
         event_repository: EventRepository | None = None,
         automation_execution_repository=None,
         knowledge_repository: KnowledgeRepository | None = None,
+        artifact_repository: ArtifactRepository | None = None,
+        artifact_storage=None,
+        artifact_max_size: int = 50 * 1024 * 1024,
     ) -> None:
         self.database = Database(db_path)
         self._users: dict[str, User] = {}
@@ -70,6 +80,11 @@ class NEEKAEngine:
         self.ai_audit_repository = SQLiteAIAuditRepository(self.database)
         self.knowledge_repository = knowledge_repository or SQLiteKnowledgeRepository(self.database)
         self.knowledge = KnowledgeService(self.knowledge_repository, self._can_access_knowledge)
+        self.artifact_repository = artifact_repository or SQLiteArtifactRepository(self.database)
+        storage_root = Path("data/artifacts") if str(db_path) == ":memory:" else Path(db_path).parent / "artifacts"
+        self.artifact_storage = artifact_storage or LocalArtifactStorage(storage_root)
+        self.artifacts = ArtifactService(self.artifact_repository, self.artifact_storage,
+                         self._can_access_knowledge, artifact_max_size)
         self.workflow = WorkflowExecutor()
         self.automation = AutomationEngine(self, self.automation_executions)
         self._load()
@@ -168,6 +183,66 @@ class NEEKAEngine:
     def search_knowledge(self, project_id: str, actor_id: str, keyword: str, type: str | None = None, status: str | None = None) -> list[dict]:
         self.knowledge._check(project_id, actor_id)
         return self.knowledge_repository.search(project_id, keyword, type, status)
+
+    def create_artifact(self, project_id: str, name: str, description: str, artifact_type: ArtifactType,
+                        mime_type: str, source: BinaryIO, actor_id: str, metadata: dict | None = None) -> Artifact:
+        artifact = self.artifacts.create(project_id, name, description, artifact_type, mime_type, source, actor_id, metadata)
+        self._emit_event(EventType.ARTIFACT_CREATED, artifact.id, actor_id, {"project_id": project_id, "version": 1})
+        self._emit_event(EventType.ARTIFACT_UPLOADED, artifact.id, actor_id, {"project_id": project_id, "size": artifact.size})
+        return artifact
+
+    def get_artifact(self, artifact_id: str, actor_id: str) -> Artifact:
+        return self.artifacts.get(artifact_id, actor_id)
+
+    def list_artifacts(self, project_id: str, actor_id: str) -> list[Artifact]:
+        return self.artifacts.list(project_id, actor_id)
+
+    def artifact_versions(self, artifact_id: str, actor_id: str):
+        return self.artifacts.versions(artifact_id, actor_id)
+
+    def restore_artifact_version(self, artifact_id: str, version_number: int, actor_id: str) -> Artifact:
+        artifact = self.artifacts.restore_version(artifact_id, version_number, actor_id)
+        self._emit_event(EventType.ARTIFACT_RESTORED, artifact.id, actor_id,
+                         {"project_id": artifact.project_id, "version": version_number})
+        return artifact
+
+    def create_artifact_version(self, artifact_id: str, source: BinaryIO, actor_id: str,
+                                metadata: dict | None = None) -> Artifact:
+        artifact = self.artifacts.add_version(artifact_id, source, actor_id, metadata)
+        self._emit_event(EventType.ARTIFACT_VERSION_CREATED, artifact.id, actor_id,
+                         {"project_id": artifact.project_id, "version": artifact.current_version})
+        return artifact
+
+    def read_artifact(self, artifact_id: str, actor_id: str):
+        return self.artifacts.read(artifact_id, actor_id)
+
+    def delete_artifact(self, artifact_id: str, actor_id: str) -> Artifact:
+        artifact = self.artifacts.remove(artifact_id, actor_id)
+        self._emit_event(EventType.ARTIFACT_DELETED, artifact.id, actor_id, {"project_id": artifact.project_id})
+        return artifact
+
+    def attach_artifact(self, artifact_id: str, target_type: str, target_id: str,
+                        role: ArtifactRole, actor_id: str) -> ArtifactRelationship:
+        relationship = self.artifacts.attach(artifact_id, target_type, target_id, role, actor_id)
+        artifact = self.get_artifact(artifact_id, actor_id)
+        self._emit_event(EventType.ARTIFACT_ATTACHED, artifact_id, actor_id,
+                         {"project_id": artifact.project_id, "target_type": target_type, "target_id": target_id, "role": role.value})
+        return relationship
+
+    def artifact_relationships(self, artifact_id: str, actor_id: str) -> list[ArtifactRelationship]:
+        return self.artifacts.relationships(artifact_id, actor_id)
+
+    def detach_artifact(self, artifact_id: str, target_type: str, target_id: str,
+                        role: ArtifactRole, actor_id: str) -> None:
+        artifact = self.get_artifact(artifact_id, actor_id)
+        self.artifacts.detach(artifact_id, target_type, target_id, role, actor_id)
+        self._emit_event(EventType.ARTIFACT_DETACHED, artifact_id, actor_id,
+                         {"project_id": artifact.project_id, "target_type": target_type, "target_id": target_id, "role": role.value})
+
+    def task_artifacts(self, task_id: str, actor_id: str) -> list[Artifact]:
+        task = self.get_task(task_id)
+        self.artifacts.permissions.check(task.project_id, actor_id)
+        return self.artifact_repository.artifacts_for_target("task", task_id)
 
     @staticmethod
     def utcnow() -> datetime:

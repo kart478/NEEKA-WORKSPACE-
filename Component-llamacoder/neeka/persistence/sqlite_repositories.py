@@ -189,7 +189,7 @@ class SQLiteEventRepository:
                  "task" if event.event_type.value.startswith("TASK") else
                  "knowledge" if event.event_type.value.split("_")[0] in {
                      "DOCUMENT", "REQUIREMENT", "DECISION", "NOTE", "REFERENCE"
-                 } else "project",
+                 } else "artifact" if event.event_type.value.startswith("ARTIFACT") else "project",
                  event.source_entity, json.dumps(event.metadata)),
             )
 

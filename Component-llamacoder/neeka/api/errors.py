@@ -20,6 +20,7 @@ from neeka.brain.exceptions import (
 from neeka.intelligence.exceptions import (
     ApprovalRequiredError, IntelligenceError, UnauthorizedIntelligenceAction,
 )
+from neeka.artifacts.exceptions import ArtifactNotFoundError, ArtifactPermissionError
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def error_code(error: Exception) -> str:
         TaskDependencyError: "task_dependency_error", InvalidTaskTransitionError: "invalid_transition",
         InvalidProjectMembershipError: "invalid_project_membership", DuplicateMemberError: "duplicate_member",
         InactiveUserError: "inactive_user",
+        ArtifactNotFoundError: "artifact_not_found", ArtifactPermissionError: "artifact_permission_denied",
     }
     return codes.get(type(error), "bad_request")
 
@@ -42,9 +44,9 @@ async def neeka_error_handler(_request: Request, error: Exception) -> JSONRespon
         return JSONResponse(status_code=403, content={"error": type(error).__name__, "message": str(error)})
     if isinstance(error, IntelligenceError):
         return JSONResponse(status_code=400, content={"error": type(error).__name__, "message": str(error)})
-    status = 409 if isinstance(error, (CircularDependencyError, DuplicateMemberError, InvalidTaskTransitionError)) else 404 if isinstance(
+    status = 403 if isinstance(error, ArtifactPermissionError) else 409 if isinstance(error, (CircularDependencyError, DuplicateMemberError, InvalidTaskTransitionError)) else 404 if isinstance(
         error, (UserNotFoundError, ProjectNotFoundError, TaskNotFoundError, EventNotFoundError,
-            AutomationExecutionNotFoundError, WorkflowNotFoundError)
+            AutomationExecutionNotFoundError, WorkflowNotFoundError, ArtifactNotFoundError)
     ) else 400
     return JSONResponse(status_code=status, content={"error": error_code(error), "message": str(error)})
 
