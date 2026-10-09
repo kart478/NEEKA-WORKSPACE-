@@ -11,6 +11,11 @@ The API and Intelligence layers do not issue SQL. Intelligence tools call the
 existing Brain methods, so workflow rules, dependencies, permissions, events,
 and persistence remain centralized.
 
+Part 8 adds a desktop boundary above the API: the React renderer can only use
+the secure Electron preload bridge; Electron main manages the local Python API
+process; the Python API remains the only route to application services, Brain,
+and persistence. See `docs/desktop.md` for the desktop lifecycle.
+
 Part 5 adds provider-neutral analysis, planning, controlled tools, permission
 modes, and persisted AI audit records. The mock provider is deterministic and
 requires no credentials.

@@ -7,3 +7,7 @@ dist/
 build/
 Component-llamacoder/data/*.db
 Component-llamacoder/data/*.db-*
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+desktop/release/
