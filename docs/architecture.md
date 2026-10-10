@@ -1,44 +1,65 @@
 # NEEKA Architecture
 
-NEEKA is layered so the Brain remains the authority for work state:
+NEEKA is a layered work-management system in which the Brain remains the authority for work state, workflow transitions, permissions, and persistence.
 
 ```text
 Client/API -> Intelligence Gateway -> Application Services -> Brain
            -> Workflow/Automation -> Repositories -> SQLite
 ```
 
-The API and Intelligence layers do not issue SQL. Intelligence tools call the
-existing Brain methods, so workflow rules, dependencies, permissions, events,
-and persistence remain centralized.
+The API and Intelligence layers do not issue SQL directly. They call application services and the Brain, which keeps workflow rules, dependencies, membership checks, events, and persistence centralized.
 
-Part 8 adds a desktop boundary above the API: the React renderer can only use
-the secure Electron preload bridge; Electron main manages the local Python API
-process; the Python API remains the only route to application services, Brain,
-and persistence. See `docs/desktop.md` for the desktop lifecycle.
+The desktop shell sits above the API and is intentionally thin. The renderer cannot reach Node or filesystem APIs directly; it uses the Electron preload bridge and the main-process IPC boundary, which validates requests before forwarding them to the local API.
 
-Part 5 adds provider-neutral analysis, planning, controlled tools, permission
-modes, and persisted AI audit records. The mock provider is deterministic and
-requires no credentials.
+## Layer boundaries
 
-## Part 6: Project Knowledge
+### Python engine
 
-Project knowledge is persistent information owned by NEEKA, separate from work
-state. The `neeka.knowledge` module provides documents, immutable document
-versions, requirements, decisions, notes, references, reusable tags, and a
-small generic relationship table. `KnowledgeService` enforces project
-membership before repository access.
+The core implementation is in `Component-llamacoder/neeka` and includes:
 
-Knowledge writes use the existing Brain event pipeline. SQLite migration v4
-creates the knowledge tables and indexes without replacing prior migrations.
-The API exposes project-scoped CRUD and local keyword search under `/api/v1`.
-Intelligence receives bounded structured knowledge through `ContextBuilder`;
-providers and tools never receive direct database access.
+- `brain/`: domain models, workflow rules, events, and engine logic
+- `persistence/`: repository interfaces, SQLite repositories, migrations, backups, and sessions
+- `api/`: FastAPI routes, schemas, dependencies, and application wiring
+- `intelligence/`: provider-neutral planning and permission enforcement
+- `knowledge/`: project knowledge, requirements, decisions, notes, references, and search
+- `artifacts/`: file storage, validation, checksum handling, and project/task attachment logic
 
-## Part 7: Workspace Artifacts
+### Desktop shell
 
-Artifacts are the actual files and outputs associated with projects and tasks,
-separate from Knowledge. `ArtifactService` coordinates the v5 SQLite
-repository and replaceable `ArtifactStorage` abstraction. The initial storage
-implementation is local, application-managed, path-validated, checksum-aware,
-and uses atomic writes. Artifact access inherits project membership and emits
-events through the existing Brain event pipeline.
+The desktop app is in `desktop/` and uses Electron + React + TypeScript. It is designed as a local client shell, not as a second implementation of business logic.
+
+### Data and persistence
+
+SQLite is the persistence layer. The database is versioned with migrations and tests exercise restart/recovery, persistence, membership rules, and artifact handling.
+
+## Project knowledge and artifacts
+
+Knowledge and artifacts are intentionally separated from task state:
+
+- Project knowledge stores documents, requirements, decisions, notes, references, tags, and relationships.
+- Artifacts represent the actual uploaded files, with local storage, validation, checksum tracking, and project-membership access control.
+- Both systems emit events through the same Brain event pipeline and inherit the same workflow safety rules.
+
+## Security and trust assumptions
+
+The current implementation is designed as a local, same-machine application boundary. It is not a full multi-user authentication system. The prominent controls are:
+
+- renderer isolation in Electron
+- API path and method validation in the main process
+- project membership enforcement in application services
+- intelligence permission modes for read-only, assisted, and autonomous actions
+
+## Current verified status
+
+Verified during this pass:
+
+- backend API and workflow tests pass
+- TypeScript compile check passes
+- the desktop UI is wired to live backend routes for projects, tasks, knowledge, and artifacts
+
+Open blockers remain:
+
+- the desktop Vitest run is blocked by a local Windows native Rollup policy issue
+- Windows packaging is not yet fully validated in this environment
+
+This architecture remains valid despite those blockers; the central principle is still that the Python engine remains authoritative and the desktop shell stays thin.

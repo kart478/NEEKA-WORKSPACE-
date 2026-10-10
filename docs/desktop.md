@@ -1,8 +1,6 @@
 # NEEKA Desktop Foundation
 
-Part 8 adds a Windows-oriented Electron shell under `desktop/`. It is a
-separate TypeScript project and does not move NEEKA business logic out of the
-Python engine.
+The desktop shell is a thin Electron front end over the real Python NEEKA API. It does not duplicate business logic; it calls the existing FastAPI service layer and keeps rendering concerns separate from work state, workflow rules, and persistence.
 
 ## Architecture
 
@@ -11,44 +9,68 @@ React renderer -> preload bridge -> Electron main -> local HTTP API
                                              -> api_main.py -> NEEKA Brain -> SQLite
 ```
 
-The renderer receives only `window.neeka.health()` and
-`window.neeka.request()`. Node, filesystem, child-process, and database APIs
-are never exposed to the renderer. API requests are restricted to `/api/v1/`
-and validated in the main process before they reach the backend.
+Key properties:
+
+- The renderer may only use the preload bridge (`window.neeka.*`), not raw Node APIs.
+- IPC validation restricts requests to `/api/v1/...` and blocks disallowed methods or traversal attempts.
+- Electron main owns the local backend lifecycle and performs clean shutdowns.
+- The backend remains the single source of truth for workflow, membership, knowledge, artifacts, and automation results.
 
 ## Backend lifecycle
 
-`BackendProcessManager` starts `api_main.py` on `127.0.0.1`, injects the
-configured port, waits for `/health`, captures backend output, reports startup
-failure, and stops the child during Electron shutdown. Development uses the
-`python` command. Set `NEEKA_PYTHON` for a virtual environment. Production
-expects a bundled runtime at `resources/backend/runtime/python.exe`, or an
-explicit `NEEKA_PYTHON` override.
+`BackendProcessManager` starts the Python backend on `127.0.0.1`, watches the health endpoint, surfaces startup failures, and stops the child process during app shutdown. The app keeps the backend private to the local machine and intentionally avoids binding to a broader network address.
 
-The backend binds only to loopback. This is a local trust boundary, not a
-replacement for user authentication. Future releases should add a per-process
-session token before allowing broader local integrations.
+Development commands:
 
-## Commands
+```powershell
+cd "C:\Users\SISO\Desktop\NEEKA WORKSPACE\Component-llamacoder"
+python -m pytest tests
+python api_main.py
+```
 
-From `desktop/`:
+Desktop development commands:
 
-```text
+```powershell
+cd "C:\Users\SISO\Desktop\NEEKA WORKSPACE\desktop"
 npm install
 npm run dev
-npm test
 npm run typecheck
+npm test
+```
+
+Production packaging command:
+
+```powershell
+cd "C:\Users\SISO\Desktop\NEEKA WORKSPACE\desktop"
+npm run build
 npm run package:win
 ```
 
-`npm run package:win` produces an NSIS installer named `NEEKA-Setup-<version>.exe`.
-The packaging metadata includes the Python backend source as an extra resource;
-embedding a Python runtime and installing backend dependencies are intentionally
-left for the deployment phase.
+## Security and protections
+
+The desktop shell currently enforces:
+
+- `contextIsolation: true`
+- `nodeIntegration: false`
+- `sandbox: true`
+- API path validation before any request is forwarded to the local backend
+- no direct renderer access to the filesystem or child-process APIs
+
+This is a useful local boundary, but it is not a replacement for user authentication or a full hardened desktop trust model.
+
+## Verified status
+
+Currently verified:
+
+- backend Python tests pass in the repository
+- TypeScript compile check passes
+- UI shell is wired to the real API surface for projects, tasks, knowledge, and artifacts
+
+Still blocked in this environment:
+
+- `npm test` fails because the Windows native Rollup binary (`@rollup/rollup-win32-x64-msvc`) is blocked by local App Control policy, so the desktop Vitest run cannot complete here
+- full production packaging has not been verified in this environment
 
 ## Current limits
 
-The shell is intentionally not a project dashboard. Only the Overview
-navigation item is active. API typing currently starts with a small client
-surface; the next step is generating request/response types from FastAPI's
-OpenAPI document rather than hand-maintaining a second model set.
+The workspace shell is functional but intentionally not a full project-management product. The app does not yet include a hardened user-authentication flow, deeper permission enforcement in the renderer, or a fully verified Windows installer build. The backend remains authoritative for all business logic and persistence.

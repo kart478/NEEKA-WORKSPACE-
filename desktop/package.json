@@ -20,6 +20,8 @@
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@rollup/rollup-win32-x64-gnu": "^4.64.5",
+    "@swc/core": "^1.16.13",
     "@types/electron": "^1.6.12",
     "@types/node": "^24.5.2",
     "@types/react": "^19.1.13",
@@ -32,10 +34,34 @@
   "build": {
     "appId": "com.neeka.workengine",
     "productName": "NEEKA Work Engine",
-    "directories": { "output": "release" },
-    "files": ["dist-electron/**/*", "dist/**/*", "package.json"],
-    "extraResources": [{ "from": "../Component-llamacoder", "to": "backend" }],
-    "win": { "target": "nsis", "artifactName": "NEEKA-Setup-${version}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../Component-llamacoder",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "NEEKA-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "allowScripts": {
+    "@swc/core@1.16.13": true,
+    "electron@38.8.6": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
   }
 }
