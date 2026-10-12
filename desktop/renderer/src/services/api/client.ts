@@ -1,8 +1,16 @@
 export type ApiRequest = { method?: string; path: string; body?: unknown; query?: Record<string, string> };
 
+function bridge(): NonNullable<Window["neeka"]> {
+  const candidate = window.neeka;
+  if (!candidate?.request || !candidate?.health) {
+    throw new Error("The desktop bridge is unavailable. Restart NEEKA Work Engine.");
+  }
+  return candidate;
+}
+
 export const apiClient = {
-  request<T>(request: ApiRequest): Promise<T> { return window.neeka.request(request) as Promise<T>; },
-  health() { return window.neeka.health(); },
+  async request<T>(request: ApiRequest): Promise<T> { return bridge().request(request) as Promise<T>; },
+  async health() { return bridge().health(); },
 };
 
 export const usersApi = {

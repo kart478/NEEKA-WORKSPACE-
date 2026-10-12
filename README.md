@@ -6,6 +6,8 @@ NEEKA Work Engine is a local work-management system that keeps Python workflow, 
 
 This repository has passed the backend Python validation suite, the TypeScript compile validation, the desktop Vitest suite, and the desktop production build. The desktop UI is wired to the real backend API for projects, tasks, knowledge, and artifacts.
 
+The desktop shell uses a dark workspace layout with Overview, Projects, My Tasks, Knowledge, Files, Intelligence, and Settings views. Renderer API calls go through the isolated Electron preload bridge; if the bridge is unavailable, the client reports a restartable error instead of throwing an undefined-property exception.
+
 ## Development commands
 
 Backend:

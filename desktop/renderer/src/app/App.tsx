@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { apiClient, projectsApi, usersApi } from "../services/api/client";
 import { knowledgeApi } from "../services/api/knowledge";
 import { tasksApi } from "../services/api/tasks";
+import { intelligenceApi } from "../services/api/intelligence";
 import type { ConnectionState } from "./connection";
 import "./app.css";
 
-type NavView = "overview" | "projects" | "tasks" | "knowledge" | "files" | "settings";
+type NavView = "overview" | "projects" | "tasks" | "knowledge" | "files" | "intelligence" | "settings";
 
 type UserRecord = { id: string; name: string; email: string; role: string; active: boolean };
 type ProjectRecord = { id: string; name: string; description: string; owner_id: string; status: string; member_ids: string[]; task_ids: string[]; created_at: string; updated_at: string };
@@ -17,13 +18,14 @@ type KnowledgeBundle = { documents?: unknown[]; requirements?: unknown[]; decisi
 type TaskInput = { title: string; description: string; projectId: string };
 
 const ACTOR_KEY = "neeka-local-actor-id";
-const navItems: Array<{ id: NavView; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "projects", label: "Projects" },
-  { id: "tasks", label: "My Tasks" },
-  { id: "knowledge", label: "Knowledge" },
-  { id: "files", label: "Files" },
-  { id: "settings", label: "Settings" },
+const navItems: Array<{ id: NavView; label: string; icon: string }> = [
+  { id: "overview", label: "Overview", icon: "⌂" },
+  { id: "projects", label: "Projects", icon: "▦" },
+  { id: "tasks", label: "My Tasks", icon: "✓" },
+  { id: "knowledge", label: "Knowledge", icon: "◇" },
+  { id: "files", label: "Files", icon: "□" },
+  { id: "intelligence", label: "Intelligence", icon: "✦" },
+  { id: "settings", label: "Settings", icon: "⚙" },
 ];
 
 export function App(): ReactElement {
@@ -45,6 +47,10 @@ export function App(): ReactElement {
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [taskInput, setTaskInput] = useState<TaskInput>({ title: "", description: "", projectId: "" });
+  const [intelligencePrompt, setIntelligencePrompt] = useState("");
+  const [intelligenceResult, setIntelligenceResult] = useState<unknown>(null);
+  const [intelligenceLoading, setIntelligenceLoading] = useState(false);
+  const actorInitializationStarted = useRef(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -178,6 +184,8 @@ export function App(): ReactElement {
   };
 
   useEffect(() => {
+    if (actorInitializationStarted.current) return;
+    actorInitializationStarted.current = true;
     void ensureActor();
   }, []);
 
@@ -196,6 +204,8 @@ export function App(): ReactElement {
     event.preventDefault();
     if (!actorId) return;
     try {
+      setError("");
+      if (!projectName.trim()) return;
       const created = await projectsApi.create<ProjectRecord>({
         name: projectName.trim(),
         description: projectDescription.trim(),
@@ -215,6 +225,8 @@ export function App(): ReactElement {
     event.preventDefault();
     if (!actorId) return;
     try {
+      setError("");
+      if (!taskInput.title.trim() || !taskInput.projectId) return;
       await tasksApi.create(taskInput.projectId, {
         title: taskInput.title.trim(),
         description: taskInput.description.trim(),
@@ -225,6 +237,26 @@ export function App(): ReactElement {
       await refreshWorkspace();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Task creation failed.");
+    }
+  };
+
+  const handleIntelligenceRequest = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (!intelligencePrompt.trim() || !actorId) return;
+    setIntelligenceLoading(true);
+    setError("");
+    try {
+      if (!selectedProjectId) throw new Error("Select a project before running an analysis.");
+      const result = await intelligenceApi.request("/api/v1/intelligence/plan", {
+        project_id: selectedProjectId,
+        goal: intelligencePrompt.trim(),
+        mode: "READ_ONLY",
+      });
+      setIntelligenceResult(result);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to reach Intelligence.");
+    } finally {
+      setIntelligenceLoading(false);
     }
   };
 
@@ -305,7 +337,7 @@ export function App(): ReactElement {
       <div className="panel wide-panel">
         <div className="panel-header"><h3>Projects</h3><button className="text-button" type="button" onClick={() => setView("projects")}>Open all</button></div>
         <div className="list-rows">
-          {filteredProjects.slice(0, 5).map((project) => (
+          {filteredProjects.length === 0 ? <div className="empty-state"><strong>No projects yet</strong><span>Create your first project above to start organizing work.</span></div> : filteredProjects.slice(0, 5).map((project) => (
             <div className="list-row" key={project.id}>
               <div>
                 <div className="row-title">{project.name}</div>
@@ -320,7 +352,7 @@ export function App(): ReactElement {
       <div className="panel wide-panel">
         <div className="panel-header"><h3>Outstanding work</h3><button className="text-button" type="button" onClick={() => setView("tasks")}>View all</button></div>
         <div className="list-rows">
-          {filteredTasks.filter((task) => task.status !== "COMPLETED").slice(0, 6).map((task) => (
+          {filteredTasks.filter((task) => task.status !== "COMPLETED").length === 0 ? <div className="empty-state"><strong>Nothing needs attention</strong><span>Outstanding work will appear here as tasks are created.</span></div> : filteredTasks.filter((task) => task.status !== "COMPLETED").slice(0, 6).map((task) => (
             <div className="list-row" key={task.id}>
               <div>
                 <div className="row-title">{task.title}</div>
@@ -335,7 +367,7 @@ export function App(): ReactElement {
       <div className="panel wide-panel">
         <div className="panel-header"><h3>Recent activity</h3></div>
         <div className="activity-list">
-          {events.slice(0, 8).map((event) => (
+          {events.length === 0 ? <div className="empty-state"><strong>No activity yet</strong><span>Workspace events will appear here as you work.</span></div> : events.slice(0, 8).map((event) => (
             <div className="activity-item" key={event.event_id}>
               <span className="event-pill">{event.event_type}</span>
               <div>
@@ -467,6 +499,35 @@ export function App(): ReactElement {
     </section>
   );
 
+  const renderIntelligence = (): ReactElement => (
+    <section className="page-block">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Assisted workspace</p>
+          <h2>Intelligence</h2>
+          <p className="section-description">Ask the local intelligence layer to analyze the selected workspace context.</p>
+        </div>
+        <span className="mode-badge">LOCAL · ASSISTED</span>
+      </div>
+      <div className="intelligence-layout">
+        <form className="panel intelligence-form" onSubmit={handleIntelligenceRequest}>
+          <label>
+            <span>What would you like to understand?</span>
+            <textarea value={intelligencePrompt} onChange={(event) => setIntelligencePrompt(event.target.value)} placeholder="Summarize risks, dependencies, or next steps for this project…" rows={7} required />
+          </label>
+          <div className="form-footer">
+            <span className="field-hint">Results use the existing backend intelligence API.</span>
+            <button className="primary-button" type="submit" disabled={intelligenceLoading}>{intelligenceLoading ? "Analyzing…" : "Run analysis"}</button>
+          </div>
+        </form>
+        <div className="panel result-panel">
+          <div className="panel-header"><div><span className="panel-kicker">Result</span><h3>Workspace insight</h3></div></div>
+          {intelligenceResult ? <pre className="result-output">{JSON.stringify(intelligenceResult, null, 2)}</pre> : <div className="empty-state"><strong>Ready when you are</strong><span>Choose a project and submit a focused question to see an analysis.</span></div>}
+        </div>
+      </div>
+    </section>
+  );
+
   const renderSettings = (): ReactElement => (
     <section className="page-block">
       <div className="section-header">
@@ -511,7 +572,7 @@ export function App(): ReactElement {
         <nav className="nav-column" aria-label="Primary navigation">
           {navItems.map((item) => (
             <button key={item.id} type="button" className={`nav-button ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}>
-              {item.label}
+              <span className="nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span>
             </button>
           ))}
         </nav>
@@ -532,9 +593,10 @@ export function App(): ReactElement {
           </div>
           <div className="header-tools">
             <div className="search-box">
-              <span>⌕</span>
+              <span aria-hidden="true">⌕</span>
               <input type="search" aria-label="Search workspace" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" />
             </div>
+            <button className="quick-create" type="button" onClick={() => { setView("overview"); setTimeout(() => document.querySelector<HTMLInputElement>('input[placeholder="Launch campaign"]')?.focus(), 0); }}>+ <span>Quick create</span></button>
             <div className="profile-pill">
               <span className="profile-avatar">{users.find((user) => user.id === actorId)?.name?.slice(0, 1).toUpperCase() ?? "W"}</span>
               <div>
@@ -553,6 +615,7 @@ export function App(): ReactElement {
         {view === "tasks" ? renderTasks() : null}
         {view === "knowledge" ? renderKnowledge() : null}
         {view === "files" ? renderFiles() : null}
+        {view === "intelligence" ? renderIntelligence() : null}
         {view === "settings" ? renderSettings() : null}
       </div>
     </main>

@@ -67,6 +67,7 @@ Currently verified:
 - `npm test -- --run` passes the desktop Vitest suite
 - `npm run build` passes the desktop production build
 - `npm run package:win` produces the Windows NSIS installer
+- the renderer API client reports a clear error when the preload bridge is unavailable
 
 ## Current limits
 

@@ -23,7 +23,7 @@ async function createWindow(): Promise<void> {
     minWidth: 760,
     minHeight: 520,
     show: false,
-    webPreferences: { preload: join(__dirname, "../preload/index.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { preload: join(__dirname, "../preload/preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.once("ready-to-show", () => window?.show());
   if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL);
