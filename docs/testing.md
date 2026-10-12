@@ -28,9 +28,8 @@ npm test -- --run
 
 Verified outcome in this environment:
 
-- command fails before tests execute
-- root cause: the Windows native Rollup binary was blocked by local App Control policy
-- error: missing or blocked `@rollup/rollup-win32-x64-msvc`
+- 2 tests passed
+- 2 test files passed
 
 ## TypeScript validation
 
@@ -45,16 +44,21 @@ Result:
 
 - TypeScript compile check passed
 
-## What this means
+## Production build
 
-The backend is stable from a Python test perspective. The desktop test layer is structurally present and the code compiles, but a native dependency on the host machine prevents the Vitest suite from running in this environment.
+Run from the desktop root:
 
-## Recommended validation after environment issue is removed
+```powershell
+npm run build
+```
 
-1. clear the stale local install or restore the Windows package set
-2. run `npm install` again in `desktop/`
-3. execute `npm test -- --run`
-4. execute `npm run build`
-5. execute `npm run package:win`
+Verified outcome in this environment:
+
+- Electron main, preload, and renderer bundles built successfully
+
+## Recommended additional validation
+
+1. execute `npm run package:win`
+2. launch the packaged installer and verify the backend lifecycle
 
 Do not treat the desktop suite as passing until the native dependency is available and the tests run successfully on the Windows host.

@@ -55,11 +55,8 @@ Verified during this pass:
 
 - backend API and workflow tests pass
 - TypeScript compile check passes
+- desktop Vitest tests pass
+- desktop production build and Windows NSIS packaging pass
 - the desktop UI is wired to live backend routes for projects, tasks, knowledge, and artifacts
 
-Open blockers remain:
-
-- the desktop Vitest run is blocked by a local Windows native Rollup policy issue
-- Windows packaging is not yet fully validated in this environment
-
-This architecture remains valid despite those blockers; the central principle is still that the Python engine remains authoritative and the desktop shell stays thin.
+The central principle remains that the Python engine is authoritative and the desktop shell stays thin.

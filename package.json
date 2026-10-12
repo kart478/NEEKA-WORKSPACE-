@@ -1,0 +1,12 @@
+{
+  "name": "neeka-workspace",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix desktop run dev",
+    "build": "npm --prefix desktop run build",
+    "test": "npm --prefix desktop test -- --run",
+    "typecheck": "npm --prefix desktop run typecheck",
+    "package:win": "npm --prefix desktop run package:win"
+  }
+}

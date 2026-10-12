@@ -4,9 +4,7 @@ NEEKA Work Engine is a local work-management system that keeps Python workflow, 
 
 ## Current status
 
-This repository has passed the backend Python validation suite and the TypeScript compile validation. The desktop UI is wired to the real backend API for projects, tasks, knowledge, and artifacts.
-
-The remaining blocker is the Windows desktop test environment: Vitest fails before execution because the native Rollup binary is blocked by local App Control policy. That prevents a clean desktop test pass in this machine even though the TypeScript app code compiles.
+This repository has passed the backend Python validation suite, the TypeScript compile validation, the desktop Vitest suite, and the desktop production build. The desktop UI is wired to the real backend API for projects, tasks, knowledge, and artifacts.
 
 ## Development commands
 
@@ -21,6 +19,11 @@ python api_main.py
 Desktop:
 
 ```powershell
+# From the repository root:
+cd "C:\Users\SISO\Desktop\NEEKA WORKSPACE"
+npm run dev
+
+# Or directly from the desktop project:
 cd "C:\Users\SISO\Desktop\NEEKA WORKSPACE\desktop"
 npm install
 npm run dev
@@ -58,6 +61,5 @@ See:
 
 ## Known limitations
 
-- desktop Vitest remains blocked by the Windows native Rollup dependency issue in this environment
 - the production Windows installer has not been fully validated here
 - the system is local-only and does not yet implement hardened user authentication for multi-user deployments

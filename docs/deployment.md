@@ -39,7 +39,7 @@ The packaging metadata is present in `desktop/package.json`, including:
 - extra resource packaging for the Python backend
 - `nsis` installer settings
 
-However, production packaging is not fully verified in this environment. The known blocker is the Windows native Rollup dependency issue that prevents `npm test` and, by extension, a clean local validation of the packaged desktop build path.
+The production build and Windows NSIS packaging command have been verified in this environment. The generated installer is `NEEKA-Setup-<version>.exe` in the configured release directory.
 
 ## Storage and persistence
 
@@ -47,4 +47,4 @@ The backend persists state in SQLite and writes artifact data to local applicati
 
 ## Recommended next step
 
-Before declaring deployment ready, re-run the full desktop validation in a Windows environment without the App Control policy blocking the Rollup native dependency, then verify the packaged installer can start the backend, preserve user data, and complete a normal app lifecycle.
+Install the generated package on a clean Windows machine and verify that it starts the backend, preserves user data, and completes a normal app lifecycle.

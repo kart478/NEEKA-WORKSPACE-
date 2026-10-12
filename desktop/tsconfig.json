@@ -13,5 +13,5 @@
     "jsx": "react-jsx",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["electron", "renderer", "tests", "vite.config.ts"]
+  "include": ["electron", "renderer", "tests", "electron.vite.config.ts"]
 }
