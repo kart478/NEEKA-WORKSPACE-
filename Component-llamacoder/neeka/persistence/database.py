@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Database:
@@ -58,6 +58,7 @@ class Database:
                 self._migration_v3(connection)
                 self._migration_v4(connection)
                 self._migration_v5(connection)
+                self._migration_v6(connection)
             else:
                 version = current["version"]
                 if version < 2:
@@ -72,6 +73,9 @@ class Database:
                 if version < 5:
                     self._migration_v5(connection)
                     version = 5
+                if version < 6:
+                    self._migration_v6(connection)
+                    version = 6
                 connection.execute("UPDATE schema_version SET version = ?", (version,))
 
     @staticmethod
@@ -242,3 +246,36 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_artifacts_checksum ON artifacts(project_id, checksum);
             """
         )
+
+    @staticmethod
+    def _migration_v6(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS task_dev_metadata (
+                task_id TEXT PRIMARY KEY,
+                work_type TEXT NOT NULL DEFAULT 'feature',
+                severity TEXT,
+                stage TEXT NOT NULL DEFAULT 'Backlog',
+                workflow_type TEXT NOT NULL DEFAULT 'feature',
+                acceptance_criteria TEXT NOT NULL DEFAULT '',
+                reproduction_steps TEXT NOT NULL DEFAULT '',
+                expected_behavior TEXT NOT NULL DEFAULT '',
+                actual_behavior TEXT NOT NULL DEFAULT '',
+                affected_component TEXT NOT NULL DEFAULT '',
+                repo_reference TEXT NOT NULL DEFAULT '',
+                external_issue TEXT NOT NULL DEFAULT '',
+                pull_request_reference TEXT NOT NULL DEFAULT '',
+                test_requirements TEXT NOT NULL DEFAULT '',
+                verification_result TEXT NOT NULL DEFAULT '',
+                target_milestone TEXT NOT NULL DEFAULT '',
+                review_outcome TEXT NOT NULL DEFAULT '',
+                blocking_task_ids TEXT NOT NULL DEFAULT '[]',
+                extra TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_task_dev_metadata_workflow
+                ON task_dev_metadata(workflow_type, stage);
+            """
+        )

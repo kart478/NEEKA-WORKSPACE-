@@ -56,3 +56,23 @@ class AutomationError(NEEKAError):
 
 class AutomationLoopError(AutomationError):
     pass
+
+
+class DevMetadataNotFoundError(NEEKAError):
+    pass
+
+
+class InvalidWorkflowStageError(NEEKAError):
+    pass
+
+
+class ReleaseBlockedError(NEEKAError):
+    pass
+
+
+class ReviewRequiresOutcomeError(NEEKAError):
+    pass
+
+
+class VerificationRequiredError(NEEKAError):
+    pass
