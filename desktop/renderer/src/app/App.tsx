@@ -3,10 +3,11 @@ import { apiClient, projectsApi, usersApi } from "../services/api/client";
 import { knowledgeApi } from "../services/api/knowledge";
 import { tasksApi } from "../services/api/tasks";
 import { intelligenceApi } from "../services/api/intelligence";
+import { devApi } from "../services/api/dev";
 import type { ConnectionState } from "./connection";
 import "./app.css";
 
-type NavView = "overview" | "projects" | "tasks" | "knowledge" | "files" | "intelligence" | "settings";
+type NavView = "overview" | "projects" | "tasks" | "engineering" | "knowledge" | "files" | "intelligence" | "settings";
 
 type UserRecord = { id: string; name: string; email: string; role: string; active: boolean };
 type ProjectRecord = { id: string; name: string; description: string; owner_id: string; status: string; member_ids: string[]; task_ids: string[]; created_at: string; updated_at: string };
@@ -14,11 +15,14 @@ type TaskRecord = { id: string; project_id: string; title: string; description: 
 type EventRecord = { event_id: string; event_type: string; timestamp: string; actor_id: string; entity_id: string; metadata?: Record<string, unknown> };
 type ArtifactRecord = { id: string; name: string; description: string; mime_type: string; created_at: string; updated_at: string; status?: string };
 type KnowledgeBundle = { documents?: unknown[]; requirements?: unknown[]; decisions?: unknown[]; notes?: unknown[]; references?: unknown[]; search?: unknown[] };
+type DevMetadataRecord = { task_id: string; work_type: string; severity: string | null; stage: string; workflow_type: string; acceptance_criteria: string; reproduction_steps: string; expected_behavior: string; actual_behavior: string; test_requirements: string; verification_result: string; review_outcome: string; blocking_task_ids: string[] };
+type DevTaskRecord = { task: TaskRecord; metadata: DevMetadataRecord };
 
 type TaskInput = { title: string; description: string; projectId: string };
 
 const ACTOR_KEY = "neeka-local-actor-id";
 const navItems: Array<{ id: NavView; label: string; icon: string }> = [
+  { id: "engineering", label: "Engineering", icon: "E" },
   { id: "overview", label: "Overview", icon: "⌂" },
   { id: "projects", label: "Projects", icon: "▦" },
   { id: "tasks", label: "My Tasks", icon: "✓" },
@@ -40,6 +44,7 @@ export function App(): ReactElement {
   const [members, setMembers] = useState<UserRecord[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeBundle | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
+  const [devTasks, setDevTasks] = useState<DevTaskRecord[]>([]);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -199,6 +204,13 @@ export function App(): ReactElement {
     if (!selectedProjectId || !actorId) return;
     void refreshProjectDetails(selectedProjectId);
   }, [selectedProjectId, actorId]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !actorId) return;
+    void devApi.listTasks<DevTaskRecord[]>(selectedProjectId, actorId)
+      .then(setDevTasks)
+      .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : "Unable to load engineering workflow."));
+  }, [selectedProjectId, actorId, tasks]);
 
   const handleCreateProject = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -448,6 +460,36 @@ export function App(): ReactElement {
     </section>
   );
 
+  const renderEngineering = (): ReactElement => {
+    const stages = Array.from(new Set(devTasks.map((item) => item.metadata.stage)));
+    const advance = async (item: DevTaskRecord): Promise<void> => {
+      const workflows: Record<string, string[]> = {
+        feature: ["Backlog", "Ready", "In Progress", "In Review", "Testing", "Done"],
+        bug: ["Reported", "Triaged", "Ready", "In Progress", "Fix Review", "Verification", "Resolved"],
+        code_review: ["Requested", "In Review", "Changes Requested", "Approved", "Completed"],
+        release: ["Planned", "In Preparation", "Validation", "Approval", "Released"],
+      };
+      const stagesForTask = workflows[item.metadata.workflow_type] ?? [];
+      const next = stagesForTask[stagesForTask.indexOf(item.metadata.stage) + 1];
+      if (!next) return;
+      try {
+        await devApi.transition(item.task.id, next, actorId);
+        await refreshWorkspace();
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "Unable to transition workflow stage.");
+      }
+    };
+    return <section className="page-block">
+      <div className="section-header"><div><p className="eyebrow">Developer workflow</p><h2>Engineering</h2><p className="section-description">Live workflow stages for {selectedProject?.name ?? "the selected project"}.</p></div></div>
+      {!selectedProjectId ? <div className="empty-state"><strong>Select a project</strong><span>Engineering workflows are project-scoped.</span></div> :
+        <div className="workflow-board">{stages.length === 0 ? <div className="empty-state"><strong>No developer tasks yet</strong><span>Add developer metadata to a task to place it on this board.</span></div> : stages.map((stage) =>
+          <div className="workflow-column" key={stage}><h3>{stage}</h3>{devTasks.filter((item) => item.metadata.stage === stage).map((item) =>
+            <article className="workflow-card" key={item.task.id}><span className="work-type-badge">{item.metadata.work_type}</span><h4>{item.task.title}</h4><p>{item.task.priority} · {item.task.status}</p>{item.metadata.acceptance_criteria ? <small>{item.metadata.acceptance_criteria}</small> : null}<button className="secondary-button" type="button" onClick={() => void advance(item)}>Advance</button></article>
+          )}</div>
+        )}</div>}
+    </section>;
+  };
+
   const renderKnowledge = (): ReactElement => (
     <section className="page-block">
       <div className="section-header">
@@ -613,6 +655,7 @@ export function App(): ReactElement {
         {view === "overview" ? renderOverview() : null}
         {view === "projects" ? renderProjects() : null}
         {view === "tasks" ? renderTasks() : null}
+        {view === "engineering" ? renderEngineering() : null}
         {view === "knowledge" ? renderKnowledge() : null}
         {view === "files" ? renderFiles() : null}
         {view === "intelligence" ? renderIntelligence() : null}

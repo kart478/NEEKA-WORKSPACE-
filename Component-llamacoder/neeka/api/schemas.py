@@ -12,6 +12,7 @@ from neeka.knowledge.document import DocumentStatus, DocumentType
 from neeka.knowledge.requirement import RequirementPriority, RequirementStatus
 from neeka.artifacts.artifact import ArtifactStatus, ArtifactType
 from neeka.artifacts.relationships import ArtifactRole
+from neeka.brain.dev_workflow import DevSeverity, DevWorkType, WorkflowType
 
 
 class UserCreate(BaseModel):
@@ -95,6 +96,84 @@ class TaskOut(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     dependency_ids: list[str]
+
+
+class DevMetadataCreate(BaseModel):
+    work_type: DevWorkType = DevWorkType.FEATURE
+    severity: DevSeverity | None = None
+    stage: str | None = None
+    workflow_type: WorkflowType = WorkflowType.FEATURE
+    acceptance_criteria: str = ""
+    reproduction_steps: str = ""
+    expected_behavior: str = ""
+    actual_behavior: str = ""
+    affected_component: str = ""
+    repo_reference: str = ""
+    external_issue: str = ""
+    pull_request_reference: str = ""
+    test_requirements: str = ""
+    verification_result: str = ""
+    target_milestone: str = ""
+    review_outcome: str = ""
+    blocking_task_ids: list[str] = Field(default_factory=list)
+    extra: dict[str, Any] = Field(default_factory=dict)
+    actor_id: str
+
+
+class DevMetadataUpdate(BaseModel):
+    work_type: DevWorkType | None = None
+    severity: DevSeverity | None = None
+    acceptance_criteria: str | None = None
+    reproduction_steps: str | None = None
+    expected_behavior: str | None = None
+    actual_behavior: str | None = None
+    affected_component: str | None = None
+    repo_reference: str | None = None
+    external_issue: str | None = None
+    pull_request_reference: str | None = None
+    test_requirements: str | None = None
+    verification_result: str | None = None
+    target_milestone: str | None = None
+    review_outcome: str | None = None
+    blocking_task_ids: list[str] | None = None
+    extra: dict[str, Any] | None = None
+    actor_id: str
+
+
+class DevMetadataOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    task_id: str
+    work_type: DevWorkType
+    severity: DevSeverity | None
+    stage: str
+    workflow_type: WorkflowType
+    acceptance_criteria: str
+    reproduction_steps: str
+    expected_behavior: str
+    actual_behavior: str
+    affected_component: str
+    repo_reference: str
+    external_issue: str
+    pull_request_reference: str
+    test_requirements: str
+    verification_result: str
+    target_milestone: str
+    review_outcome: str
+    blocking_task_ids: list[str]
+    extra: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkflowTransitionRequest(BaseModel):
+    stage: str = Field(min_length=1, max_length=100)
+    actor_id: str
+
+
+class ReleaseReadinessOut(BaseModel):
+    release_task_id: str
+    ready: bool
+    incomplete_tasks: list[TaskOut]
 
 
 class ActorRequest(BaseModel):

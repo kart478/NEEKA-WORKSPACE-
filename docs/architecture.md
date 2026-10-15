@@ -40,6 +40,10 @@ Knowledge and artifacts are intentionally separated from task state:
 - Artifacts represent the actual uploaded files, with local storage, validation, checksum tracking, and project-membership access control.
 - Both systems emit events through the same Brain event pipeline and inherit the same workflow safety rules.
 
+## Developer workflow pack
+
+Developer workflows add semantic stages (`Backlog`, `Verification`, `Released`, and similar) in `task_dev_metadata`; they do not add new global task statuses. The engine maps each semantic stage through the existing state machine and enforces bug-verification, review-outcome, and release-blocker gates before completion. The Electron Engineering view reads the same API and does not own workflow state.
+
 ## Security and trust assumptions
 
 The current implementation is designed as a local, same-machine application boundary. It is not a full multi-user authentication system. The prominent controls are:

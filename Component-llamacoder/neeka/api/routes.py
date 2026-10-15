@@ -13,6 +13,7 @@ from neeka.services.control import ControlService
 from neeka.intelligence.gateway import IntelligenceGateway, StructuredAction
 from neeka.intelligence.permissions import PermissionMode
 from neeka.workflow.definitions import STANDARD_TASK_WORKFLOW
+from neeka.brain.dev_workflow import DEV_WORKFLOWS, DevMetadata, WorkflowType, valid_stages
 from neeka.knowledge.decision import Decision
 from neeka.knowledge.document import Document
 from neeka.knowledge.note import Note
@@ -29,6 +30,7 @@ from .schemas import (
     DecisionCreate, DecisionOut, DocumentCreate, DocumentOut, DocumentUpdate,
     NoteCreate, NoteOut, ReferenceCreate, ReferenceOut, RequirementCreate, RequirementOut,
     ArtifactAttachRequest, ArtifactOut, ArtifactVersionOut,
+    DevMetadataCreate, DevMetadataOut, DevMetadataUpdate, ReleaseReadinessOut, WorkflowTransitionRequest,
 )
 
 router = APIRouter()
@@ -39,8 +41,7 @@ def event_out(event: Event) -> EventOut:
                     actor_id=event.actor_id, entity_id=event.source_entity, metadata=event.metadata)
 
 
-def workflow_out() -> WorkflowOut:
-    definition = STANDARD_TASK_WORKFLOW
+def workflow_out(definition=STANDARD_TASK_WORKFLOW) -> WorkflowOut:
     return WorkflowOut(
         workflow_id=definition.workflow_id, name=definition.name, description=definition.description,
         version=definition.version, active=definition.active,
@@ -287,9 +288,57 @@ def list_project_tasks(project_id: str, engine: NEEKAEngine = Depends(get_engine
     return engine.list_tasks(project_id)
 
 
+@router.get("/projects/{project_id}/dev-tasks")
+def list_dev_tasks(project_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> list[dict]:
+    metadata_by_task = {item.task_id: item for item in engine.list_dev_metadata(project_id, actor_id)}
+    return [
+        {"task": TaskOut.model_validate(task).model_dump(mode="json"),
+         "metadata": DevMetadataOut.model_validate(metadata_by_task[task.id]).model_dump(mode="json")}
+        for task in engine.get_project_tasks(project_id) if task.id in metadata_by_task
+    ]
+
+
+@router.get("/projects/{project_id}/release-readiness", response_model=ReleaseReadinessOut)
+def release_readiness(project_id: str, task_id: str = Query(...), actor_id: str = Query(...),
+                      engine: NEEKAEngine = Depends(get_engine)) -> ReleaseReadinessOut:
+    task = engine.get_task(task_id)
+    if task.project_id != project_id:
+        raise ValueError("Release task does not belong to this project")
+    incomplete = engine.check_release_readiness(task_id, actor_id)
+    return ReleaseReadinessOut(release_task_id=task_id, ready=not incomplete, incomplete_tasks=incomplete)
+
+
 @router.get("/tasks/{task_id}", response_model=TaskOut)
 def get_task(task_id: str, engine: NEEKAEngine = Depends(get_engine)) -> Task:
     return engine.get_task(task_id)
+
+
+@router.get("/tasks/{task_id}/dev-metadata", response_model=DevMetadataOut)
+def get_dev_metadata(task_id: str, actor_id: str = Query(...), engine: NEEKAEngine = Depends(get_engine)) -> DevMetadata:
+    return engine.get_dev_metadata(task_id, actor_id)
+
+
+@router.post("/tasks/{task_id}/dev-metadata", response_model=DevMetadataOut, status_code=status.HTTP_201_CREATED)
+def create_dev_metadata(task_id: str, payload: DevMetadataCreate,
+                        engine: NEEKAEngine = Depends(get_engine)) -> DevMetadata:
+    values = payload.model_dump(exclude={"actor_id"})
+    workflow_type = values["workflow_type"]
+    if values["stage"] is None:
+        values["stage"] = valid_stages(workflow_type)[0]
+    return engine.create_dev_metadata(task_id, payload.actor_id, DevMetadata(task_id=task_id, **values))
+
+
+@router.patch("/tasks/{task_id}/dev-metadata", response_model=DevMetadataOut)
+def update_dev_metadata(task_id: str, payload: DevMetadataUpdate,
+                        engine: NEEKAEngine = Depends(get_engine)) -> DevMetadata:
+    changes = payload.model_dump(exclude_unset=True, exclude={"actor_id"})
+    return engine.update_dev_metadata(task_id, payload.actor_id, **changes)
+
+
+@router.post("/tasks/{task_id}/dev-transition", response_model=TaskOut)
+def transition_dev_stage(task_id: str, payload: WorkflowTransitionRequest,
+                         engine: NEEKAEngine = Depends(get_engine)) -> Task:
+    return engine.transition_dev_stage(task_id, payload.stage, payload.actor_id)
 
 
 @router.patch("/tasks/{task_id}", response_model=TaskOut)
@@ -392,6 +441,11 @@ def retry_execution(execution_id: str, engine: NEEKAEngine = Depends(get_engine)
 @router.get("/workflows", response_model=list[WorkflowOut])
 def workflows() -> list[WorkflowOut]:
     return [workflow_out()]
+
+
+@router.get("/workflows/dev/{workflow_type}", response_model=WorkflowOut)
+def dev_workflow(workflow_type: WorkflowType) -> WorkflowOut:
+    return workflow_out(DEV_WORKFLOWS[workflow_type])
 
 
 @router.get("/workflows/{workflow_id}", response_model=WorkflowOut)

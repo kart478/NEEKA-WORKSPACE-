@@ -14347,8 +14347,38 @@ const tasksApi = {
 const intelligenceApi = {
   request: (path, body) => apiClient.request({ method: "POST", path, body })
 };
+const devApi = {
+  listTasks: (projectId, actorId) => apiClient.request({
+    path: `/api/v1/projects/${encodeURIComponent(projectId)}/dev-tasks`,
+    query: { actor_id: actorId }
+  }),
+  getMetadata: (taskId, actorId) => apiClient.request({
+    path: `/api/v1/tasks/${encodeURIComponent(taskId)}/dev-metadata`,
+    query: { actor_id: actorId }
+  }),
+  createMetadata: (taskId, body) => apiClient.request({
+    method: "POST",
+    path: `/api/v1/tasks/${encodeURIComponent(taskId)}/dev-metadata`,
+    body
+  }),
+  updateMetadata: (taskId, body) => apiClient.request({
+    method: "PATCH",
+    path: `/api/v1/tasks/${encodeURIComponent(taskId)}/dev-metadata`,
+    body
+  }),
+  transition: (taskId, stage, actorId) => apiClient.request({
+    method: "POST",
+    path: `/api/v1/tasks/${encodeURIComponent(taskId)}/dev-transition`,
+    body: { stage, actor_id: actorId }
+  }),
+  releaseReadiness: (projectId, taskId, actorId) => apiClient.request({
+    path: `/api/v1/projects/${encodeURIComponent(projectId)}/release-readiness`,
+    query: { task_id: taskId, actor_id: actorId }
+  })
+};
 const ACTOR_KEY = "neeka-local-actor-id";
 const navItems = [
+  { id: "engineering", label: "Engineering", icon: "E" },
   { id: "overview", label: "Overview", icon: "⌂" },
   { id: "projects", label: "Projects", icon: "▦" },
   { id: "tasks", label: "My Tasks", icon: "✓" },
@@ -14369,6 +14399,7 @@ function App() {
   const [members, setMembers] = reactExports.useState([]);
   const [knowledge, setKnowledge] = reactExports.useState(null);
   const [artifacts, setArtifacts] = reactExports.useState([]);
+  const [devTasks, setDevTasks] = reactExports.useState([]);
   const [search, setSearch] = reactExports.useState("");
   const [error, setError] = reactExports.useState("");
   const [loading, setLoading] = reactExports.useState(false);
@@ -14521,6 +14552,10 @@ function App() {
     if (!selectedProjectId || !actorId) return;
     void refreshProjectDetails(selectedProjectId);
   }, [selectedProjectId, actorId]);
+  reactExports.useEffect(() => {
+    if (!selectedProjectId || !actorId) return;
+    void devApi.listTasks(selectedProjectId, actorId).then(setDevTasks).catch((requestError) => setError(requestError instanceof Error ? requestError.message : "Unable to load engineering workflow."));
+  }, [selectedProjectId, actorId, tasks]);
   const handleCreateProject = async (event) => {
     event.preventDefault();
     if (!actorId) return;
@@ -14792,6 +14827,61 @@ function App() {
       ] }, task.id);
     }) })
   ] });
+  const renderEngineering = () => {
+    const stages = Array.from(new Set(devTasks.map((item) => item.metadata.stage)));
+    const advance = async (item) => {
+      const workflows = {
+        feature: ["Backlog", "Ready", "In Progress", "In Review", "Testing", "Done"],
+        bug: ["Reported", "Triaged", "Ready", "In Progress", "Fix Review", "Verification", "Resolved"],
+        code_review: ["Requested", "In Review", "Changes Requested", "Approved", "Completed"],
+        release: ["Planned", "In Preparation", "Validation", "Approval", "Released"]
+      };
+      const stagesForTask = workflows[item.metadata.workflow_type] ?? [];
+      const next = stagesForTask[stagesForTask.indexOf(item.metadata.stage) + 1];
+      if (!next) return;
+      try {
+        await devApi.transition(item.task.id, next, actorId);
+        await refreshWorkspace();
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "Unable to transition workflow stage.");
+      }
+    };
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "page-block", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "section-header", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "eyebrow", children: "Developer workflow" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "Engineering" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "section-description", children: [
+          "Live workflow stages for ",
+          selectedProject?.name ?? "the selected project",
+          "."
+        ] })
+      ] }) }),
+      !selectedProjectId ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "empty-state", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Select a project" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Engineering workflows are project-scoped." })
+      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workflow-board", children: stages.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "empty-state", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "No developer tasks yet" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Add developer metadata to a task to place it on this board." })
+      ] }) : stages.map(
+        (stage) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workflow-column", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: stage }),
+          devTasks.filter((item) => item.metadata.stage === stage).map(
+            (item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("article", { className: "workflow-card", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "work-type-badge", children: item.metadata.work_type }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("h4", { children: item.task.title }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { children: [
+                item.task.priority,
+                " · ",
+                item.task.status
+              ] }),
+              item.metadata.acceptance_criteria ? /* @__PURE__ */ jsxRuntimeExports.jsx("small", { children: item.metadata.acceptance_criteria }) : null,
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "secondary-button", type: "button", onClick: () => void advance(item), children: "Advance" })
+            ] }, item.task.id)
+          )
+        ] }, stage)
+      ) })
+    ] });
+  };
   const renderKnowledge = () => /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "page-block", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "section-header", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "eyebrow", children: "Knowledge" }),
@@ -14961,6 +15051,7 @@ function App() {
       view === "overview" ? renderOverview() : null,
       view === "projects" ? renderProjects() : null,
       view === "tasks" ? renderTasks() : null,
+      view === "engineering" ? renderEngineering() : null,
       view === "knowledge" ? renderKnowledge() : null,
       view === "files" ? renderFiles() : null,
       view === "intelligence" ? renderIntelligence() : null,

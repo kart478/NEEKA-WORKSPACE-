@@ -5,6 +5,7 @@ from neeka.brain.event import Event
 from neeka.brain.project import Project
 from neeka.brain.task import Task
 from neeka.brain.user import User
+from neeka.brain.dev_workflow import DevMetadata
 
 
 class UserRepository(Protocol):
@@ -46,3 +47,9 @@ class AutomationExecutionRepository(Protocol):
 class AIAuditRepository(Protocol):
     def append(self, record: dict) -> None: ...
     def list(self) -> list[dict]: ...
+
+
+class DevMetadataRepository(Protocol):
+    def save(self, metadata: DevMetadata) -> None: ...
+    def get(self, task_id: str) -> DevMetadata | None: ...
+    def list_by_project(self, project_id: str) -> list[DevMetadata]: ...

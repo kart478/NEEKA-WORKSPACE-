@@ -58,6 +58,16 @@ class ActorTaskInput(BaseModel):
     actor_id: str
 
 
+class DevTaskInput(BaseModel):
+    task_id: str
+    actor_id: str
+
+
+class ReleaseInput(BaseModel):
+    task_id: str
+    actor_id: str
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     name: str
@@ -142,3 +152,44 @@ class ToolRegistry:
             self.register(ToolDefinition(name, ActorTaskInput, True, lambda e, p, method=method: (
                 getattr(e, method)(p["task_id"], p["actor_id"]), _model(e.get_task(p["task_id"]))
             )[1]))
+        self.register(ToolDefinition("propose_feature_plan", DevTaskInput, False, lambda e, p: {
+            "task_id": p["task_id"], "proposal": [
+                "Clarify acceptance criteria", "Implement the smallest viable change",
+                "Add automated coverage", "Review and verify the result",
+            ],
+        }))
+        self.register(ToolDefinition("break_into_tasks", DevTaskInput, False, lambda e, p: {
+            "task_id": p["task_id"], "suggested_tasks": ["Design", "Implementation", "Tests", "Review"],
+        }))
+        self.register(ToolDefinition("draft_acceptance_criteria", DevTaskInput, False, lambda e, p: {
+            "task_id": p["task_id"], "acceptance_criteria": [
+                "The requested behavior is implemented", "Relevant tests pass", "The outcome is documented",
+            ],
+        }))
+        self.register(ToolDefinition("summarize_bug", DevTaskInput, False, lambda e, p: self._bug_summary(e, p)))
+        self.register(ToolDefinition("check_release_readiness", ReleaseInput, False, lambda e, p: {
+            "task_id": p["task_id"], "incomplete_blockers": [
+                _model(task) for task in e.check_release_readiness(p["task_id"], p["actor_id"])
+            ],
+        }))
+        self.register(ToolDefinition("draft_release_notes", ReleaseInput, False, lambda e, p: self._release_notes(e, p)))
+
+    @staticmethod
+    def _bug_summary(engine, parameters: dict) -> dict:
+        metadata = engine.get_dev_metadata(parameters["task_id"], parameters["actor_id"])
+        return {"task_id": parameters["task_id"], "summary": {
+            "reproduction_steps": metadata.reproduction_steps,
+            "expected_behavior": metadata.expected_behavior,
+            "actual_behavior": metadata.actual_behavior,
+            "affected_component": metadata.affected_component,
+        }}
+
+    @staticmethod
+    def _release_notes(engine, parameters: dict) -> dict:
+        release = engine.get_task(parameters["task_id"])
+        project = engine.get_project(release.project_id)
+        completed = [task.title for task in engine.get_project_tasks(project.id)
+                     if task.status.value == "COMPLETED" and task.id != release.id]
+        decisions = engine.list_decisions(project.id, parameters["actor_id"])
+        return {"task_id": release.id, "project_id": project.id, "completed_work": completed,
+                "decisions": [item.title for item in decisions]}

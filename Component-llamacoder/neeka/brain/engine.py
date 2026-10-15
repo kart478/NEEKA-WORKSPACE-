@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from neeka.persistence.database import Database
-from neeka.persistence.repositories import EventRepository, ProjectRepository, TaskRepository, UserRepository
+from neeka.persistence.repositories import DevMetadataRepository, EventRepository, ProjectRepository, TaskRepository, UserRepository
 from neeka.knowledge.decision import Decision
 from neeka.knowledge.document import Document
 from neeka.knowledge.note import Note
@@ -26,6 +26,7 @@ from neeka.persistence.sqlite_repositories import (
     SQLiteProjectRepository,
     SQLiteTaskRepository,
     SQLiteUserRepository,
+    SQLiteDevMetadataRepository,
 )
 from neeka.automation.engine import AutomationEngine
 from .event import Event, EventType
@@ -41,11 +42,17 @@ from .exceptions import (
     TaskDependencyError,
     TaskNotFoundError,
     UserNotFoundError,
+    DevMetadataNotFoundError,
+    InvalidWorkflowStageError,
+    ReleaseBlockedError,
+    ReviewRequiresOutcomeError,
+    VerificationRequiredError,
 )
 from .project import Project, ProjectStatus
 from .task import Task, TaskPriority, TaskStatus
 from .user import User, UserRole
 from .workflow import Workflow
+from .dev_workflow import DEV_WORKFLOWS, DevMetadata, WorkflowType, is_valid_stage, next_stage, stage_to_status
 from neeka.workflow.executor import WorkflowExecutor
 
 logger = logging.getLogger(__name__)
@@ -66,6 +73,7 @@ class NEEKAEngine:
         artifact_repository: ArtifactRepository | None = None,
         artifact_storage=None,
         artifact_max_size: int = 50 * 1024 * 1024,
+        dev_metadata_repository: DevMetadataRepository | None = None,
     ) -> None:
         self.database = Database(db_path)
         self._users: dict[str, User] = {}
@@ -78,6 +86,7 @@ class NEEKAEngine:
         self.events = event_repository or SQLiteEventRepository(self.database)
         self.automation_executions = automation_execution_repository or SQLiteAutomationExecutionRepository(self.database)
         self.ai_audit_repository = SQLiteAIAuditRepository(self.database)
+        self.dev_metadata = dev_metadata_repository or SQLiteDevMetadataRepository(self.database)
         self.knowledge_repository = knowledge_repository or SQLiteKnowledgeRepository(self.database)
         self.knowledge = KnowledgeService(self.knowledge_repository, self._can_access_knowledge)
         self.artifact_repository = artifact_repository or SQLiteArtifactRepository(self.database)
@@ -397,6 +406,123 @@ class NEEKAEngine:
             raise TaskNotFoundError(f"Task {task_id} not found")
         return self._tasks[task_id]
 
+    def create_task_with_dev_metadata(
+        self, title: str, description: str, project_id: str, creator_id: str,
+        priority: TaskPriority = TaskPriority.MEDIUM, metadata: DevMetadata | None = None,
+    ) -> Task:
+        """Create a normal task and attach optional developer workflow metadata."""
+        task = self.create_task(title, description, project_id, creator_id, priority)
+        details = metadata or DevMetadata(task_id=task.id)
+        details.task_id = task.id
+        if not is_valid_stage(details.workflow_type, details.stage):
+            raise InvalidWorkflowStageError(f"{details.stage!r} is not valid for {details.workflow_type.value}")
+        details.updated_at = datetime.utcnow()
+        self.dev_metadata.save(details)
+        self._emit_event(EventType.DEV_METADATA_CREATED, task.id, creator_id, {"project_id": project_id})
+        return task
+
+    def get_dev_metadata(self, task_id: str, actor_id: str) -> DevMetadata:
+        task = self.get_task(task_id)
+        if not self.projects.has_member(task.project_id, actor_id):
+            raise InvalidProjectMembershipError(f"Actor {actor_id} is not a project member")
+        metadata = self.dev_metadata.get(task_id)
+        if metadata is None:
+            raise DevMetadataNotFoundError(f"Task {task_id} has no developer metadata")
+        return metadata
+
+    def create_dev_metadata(self, task_id: str, actor_id: str, metadata: DevMetadata) -> DevMetadata:
+        task = self.get_task(task_id)
+        if not self.projects.has_member(task.project_id, actor_id):
+            raise InvalidProjectMembershipError(f"Actor {actor_id} is not a project member")
+        if self.dev_metadata.get(task_id) is not None:
+            raise InvalidWorkflowStageError(f"Task {task_id} already has developer metadata")
+        metadata.task_id = task_id
+        if not is_valid_stage(metadata.workflow_type, metadata.stage):
+            raise InvalidWorkflowStageError(f"{metadata.stage!r} is not valid for {metadata.workflow_type.value}")
+        self.dev_metadata.save(metadata)
+        self._emit_event(EventType.DEV_METADATA_CREATED, task_id, actor_id, {"project_id": task.project_id})
+        return metadata
+
+    def list_dev_metadata(self, project_id: str, actor_id: str) -> list[DevMetadata]:
+        if not self.projects.has_member(project_id, actor_id):
+            raise InvalidProjectMembershipError(f"Actor {actor_id} is not a project member")
+        self.get_project(project_id)
+        return self.dev_metadata.list_by_project(project_id)
+
+    def update_dev_metadata(self, task_id: str, actor_id: str, **changes) -> DevMetadata:
+        metadata = self.get_dev_metadata(task_id, actor_id)
+        for key, value in changes.items():
+            if value is not None and hasattr(metadata, key):
+                setattr(metadata, key, value)
+        if not is_valid_stage(metadata.workflow_type, metadata.stage):
+            raise InvalidWorkflowStageError(f"{metadata.stage!r} is not valid for {metadata.workflow_type.value}")
+        metadata.updated_at = datetime.utcnow()
+        self.dev_metadata.save(metadata)
+        self._emit_event(EventType.DEV_METADATA_UPDATED, task_id, actor_id,
+                         {"project_id": self.get_task(task_id).project_id})
+        return metadata
+
+    def transition_dev_stage(self, task_id: str, stage: str, actor_id: str) -> Task:
+        task = self.get_task(task_id)
+        metadata = self.get_dev_metadata(task_id, actor_id)
+        if not is_valid_stage(metadata.workflow_type, stage):
+            raise InvalidWorkflowStageError(f"{stage!r} is not valid for {metadata.workflow_type.value}")
+        if stage == metadata.stage:
+            return task
+        expected = next_stage(metadata.workflow_type, metadata.stage)
+        review_retry = (metadata.workflow_type == WorkflowType.CODE_REVIEW
+                        and metadata.stage == "Changes Requested" and stage == "In Review")
+        if stage != expected and not review_retry:
+            raise InvalidWorkflowStageError(f"Cannot transition {metadata.workflow_type.value} from {metadata.stage!r} to {stage!r}")
+        target_status = stage_to_status(stage)
+        if target_status == TaskStatus.COMPLETED:
+            self._enforce_dev_completion(metadata)
+        self._transition_to_dev_status(task, target_status)
+        previous_stage = metadata.stage
+        metadata.stage = stage
+        metadata.updated_at = datetime.utcnow()
+        self.tasks.save(task)
+        self.dev_metadata.save(metadata)
+        self._emit_event(EventType.TASK_STAGE_TRANSITIONED, task_id, actor_id,
+                         {"project_id": task.project_id, "from_stage": previous_stage, "to_stage": stage})
+        if stage in {"In Review", "Fix Review"}:
+            self._emit_event(EventType.TASK_REVIEW_REQUESTED, task_id, actor_id, {"project_id": task.project_id})
+        if stage == "Verification":
+            self._emit_event(EventType.TASK_VERIFICATION_COMPLETED, task_id, actor_id, {"project_id": task.project_id})
+        if target_status == TaskStatus.COMPLETED:
+            task.completed_at = datetime.utcnow()
+            self.tasks.save(task)
+            self._check_project_completion(task.project_id)
+        return task
+
+    def _transition_to_dev_status(self, task: Task, target: TaskStatus) -> None:
+        """Bridge semantic stages over the smaller global TaskStatus state machine."""
+        if task.status == target:
+            return
+        if task.status == TaskStatus.TODO and target == TaskStatus.IN_PROGRESS:
+            self._transition_task(task, TaskStatus.READY)
+        self._transition_task(task, target)
+
+    def check_release_readiness(self, task_id: str, actor_id: str) -> list[Task]:
+        metadata = self.get_dev_metadata(task_id, actor_id)
+        if metadata.workflow_type != WorkflowType.RELEASE:
+            raise InvalidWorkflowStageError("Release readiness is only available for release workflow tasks")
+        incomplete = [self.get_task(item) for item in metadata.blocking_task_ids
+                      if self.get_task(item).status != TaskStatus.COMPLETED]
+        self._emit_event(EventType.RELEASE_READINESS_CHECKED, task_id, actor_id,
+                         {"project_id": self.get_task(task_id).project_id, "incomplete_count": len(incomplete)})
+        return incomplete
+
+    def _enforce_dev_completion(self, metadata: DevMetadata) -> None:
+        if metadata.workflow_type == WorkflowType.BUG and metadata.requires_verification_before_completion() and not metadata.verification_satisfied():
+            raise VerificationRequiredError("Bug tasks with test requirements need a verification result before completion")
+        if metadata.requires_review_outcome() and not metadata.review_outcome_recorded():
+            raise ReviewRequiresOutcomeError("Code review tasks need a review outcome before completion")
+        if metadata.workflow_type == WorkflowType.RELEASE:
+            incomplete = [item for item in metadata.blocking_task_ids if self.get_task(item).status != TaskStatus.COMPLETED]
+            if incomplete:
+                raise ReleaseBlockedError(f"Release is blocked by open tasks: {', '.join(incomplete)}")
+
     def list_tasks(self, project_id: str | None = None) -> list[Task]:
         return [task for task in self._tasks.values()
                 if project_id is None or task.project_id == project_id]
@@ -516,6 +642,9 @@ class NEEKAEngine:
         self.get_user(actor_id)
         if task.status == TaskStatus.COMPLETED:
             return
+        metadata = self.dev_metadata.get(task_id)
+        if metadata is not None:
+            self._enforce_dev_completion(metadata)
         self._transition_task(task, TaskStatus.COMPLETED)
         task.completed_at = datetime.utcnow()
         self.tasks.save(task)

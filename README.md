@@ -51,6 +51,7 @@ The importable implementation lives in `Component-llamacoder/neeka`:
 - `intelligence/` contains provider-neutral planning and permission modes.
 - `knowledge/` contains project knowledge records and search.
 - `artifacts/` handles file validation, storage, checksum logic, and attachment management.
+- `brain/dev_workflow.py` adds optional developer-stage metadata and completion gates while preserving the global task status machine.
 
 The desktop shell is in `desktop/`; it calls the real backend and does not replace the Python engine.
 
@@ -60,6 +61,7 @@ See:
 - [`docs/desktop.md`](docs/desktop.md)
 - [`docs/deployment.md`](docs/deployment.md)
 - [`docs/testing.md`](docs/testing.md)
+- [`docs/developer-workflow.md`](docs/developer-workflow.md)
 
 ## Known limitations
 

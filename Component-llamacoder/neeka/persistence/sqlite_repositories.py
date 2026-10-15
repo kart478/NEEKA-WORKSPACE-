@@ -9,6 +9,7 @@ from neeka.brain.event import Event, EventType
 from neeka.brain.project import Project, ProjectStatus
 from neeka.brain.task import Task, TaskPriority, TaskStatus
 from neeka.brain.user import User, UserRole
+from neeka.brain.dev_workflow import DevMetadata, DevSeverity, DevWorkType, WorkflowType
 from .database import Database
 
 
@@ -275,3 +276,74 @@ class SQLiteAIAuditRepository:
             {**dict(row), "parameters": json.loads(row["parameters"]), "success": bool(row["success"])}
             for row in rows
         ]
+
+
+class SQLiteDevMetadataRepository:
+    """Persistence for optional developer-workflow metadata attached to tasks."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def save(self, metadata: DevMetadata) -> None:
+        with self.database.session() as connection:
+            connection.execute(
+                """INSERT INTO task_dev_metadata(
+                    task_id, work_type, severity, stage, workflow_type, acceptance_criteria,
+                    reproduction_steps, expected_behavior, actual_behavior, affected_component,
+                    repo_reference, external_issue, pull_request_reference, test_requirements,
+                    verification_result, target_milestone, review_outcome, blocking_task_ids,
+                    extra, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    work_type=excluded.work_type, severity=excluded.severity, stage=excluded.stage,
+                    workflow_type=excluded.workflow_type, acceptance_criteria=excluded.acceptance_criteria,
+                    reproduction_steps=excluded.reproduction_steps, expected_behavior=excluded.expected_behavior,
+                    actual_behavior=excluded.actual_behavior, affected_component=excluded.affected_component,
+                    repo_reference=excluded.repo_reference, external_issue=excluded.external_issue,
+                    pull_request_reference=excluded.pull_request_reference,
+                    test_requirements=excluded.test_requirements,
+                    verification_result=excluded.verification_result,
+                    target_milestone=excluded.target_milestone,
+                    review_outcome=excluded.review_outcome,
+                    blocking_task_ids=excluded.blocking_task_ids, extra=excluded.extra,
+                    updated_at=excluded.updated_at""",
+                (metadata.task_id, metadata.work_type.value,
+                 metadata.severity.value if metadata.severity else None, metadata.stage,
+                 metadata.workflow_type.value, metadata.acceptance_criteria,
+                 metadata.reproduction_steps, metadata.expected_behavior, metadata.actual_behavior,
+                 metadata.affected_component, metadata.repo_reference, metadata.external_issue,
+                 metadata.pull_request_reference, metadata.test_requirements,
+                 metadata.verification_result, metadata.target_milestone, metadata.review_outcome,
+                 json.dumps(metadata.blocking_task_ids), json.dumps(metadata.extra),
+                 metadata.created_at.isoformat(), metadata.updated_at.isoformat()),
+            )
+
+    def get(self, task_id: str) -> DevMetadata | None:
+        with self.database.session() as connection:
+            row = connection.execute("SELECT * FROM task_dev_metadata WHERE task_id = ?", (task_id,)).fetchone()
+        return self._map(row) if row else None
+
+    def list_by_project(self, project_id: str) -> list[DevMetadata]:
+        with self.database.session() as connection:
+            rows = connection.execute(
+                """SELECT metadata.* FROM task_dev_metadata AS metadata
+                   JOIN tasks ON tasks.id = metadata.task_id
+                   WHERE tasks.project_id = ? ORDER BY tasks.created_at""", (project_id,)
+            ).fetchall()
+        return [self._map(row) for row in rows]
+
+    @staticmethod
+    def _map(row: sqlite3.Row) -> DevMetadata:
+        return DevMetadata(
+            task_id=row["task_id"], work_type=DevWorkType(row["work_type"]),
+            severity=DevSeverity(row["severity"]) if row["severity"] else None,
+            stage=row["stage"], workflow_type=WorkflowType(row["workflow_type"]),
+            acceptance_criteria=row["acceptance_criteria"], reproduction_steps=row["reproduction_steps"],
+            expected_behavior=row["expected_behavior"], actual_behavior=row["actual_behavior"],
+            affected_component=row["affected_component"], repo_reference=row["repo_reference"],
+            external_issue=row["external_issue"], pull_request_reference=row["pull_request_reference"],
+            test_requirements=row["test_requirements"], verification_result=row["verification_result"],
+            target_milestone=row["target_milestone"], review_outcome=row["review_outcome"],
+            blocking_task_ids=json.loads(row["blocking_task_ids"]), extra=json.loads(row["extra"]),
+            created_at=_required_date(row["created_at"]), updated_at=_required_date(row["updated_at"]),
+        )
